@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kicad-fab-package"
+version = "0.1.0"
+description = "Export a checked KiCad 10 fabrication and assembly package for MacroFab from a git commit: Gerbers, drills with filled vias split out, XYRS placement, BOM xlsx, PDFs, STEP, ODB++ and the upload zip."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Aaron Snyder"}]
+keywords = [
+    "kicad", "kicad-cli", "pcb", "pcba", "eda", "gerber", "excellon", "macrofab", "bom", "xyrs",
+    "pick-and-place", "fabrication", "assembly", "manufacturing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+# merge the two assembly pages into one PDF (pypdf), and check every designator is printed on it (PyMuPDF).
+# PyMuPDF is AGPL-3.0 licensed: it is optional and never bundled; install it only if that license suits you.
+pdf = ["pypdf>=3.0", "PyMuPDF>=1.23"]
+# TOML config files on Python < 3.11 (JSON config files need nothing)
+toml = ["tomli>=1.1; python_version < '3.11'"]
+all = ["pypdf>=3.0", "PyMuPDF>=1.23", "tomli>=1.1; python_version < '3.11'"]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/aqsnyder/kicad-fab-package"
+Repository = "https://github.com/aqsnyder/kicad-fab-package"
+Issues = "https://github.com/aqsnyder/kicad-fab-package/issues"
+Documentation = "https://github.com/aqsnyder/kicad-fab-package/tree/main/docs"
+Changelog = "https://github.com/aqsnyder/kicad-fab-package/blob/main/CHANGELOG.md"
+
+[project.scripts]
+kicad-fab-export = "kicad_fab_package.export_fab:main"
+kicad-macrofab-bom = "kicad_fab_package.make_macrofab_xlsx:main"
+kicad-bom-check = "kicad_fab_package.bom_check:main"
+kicad-bomdiff = "kicad_fab_package.bomdiff:main"
+kicad-project-copy = "kicad_fab_package.kproject:main"
+
+[tool.setuptools]
+packages = ["kicad_fab_package"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
