@@ -28,16 +28,20 @@ Initial public release.
   vs board (DNP, BOM exclusion, value, footprint, MPN), XYRS vs the KiCad position file, no solder paste on parts
   that are not placed (board and plotted Gerbers), designators printed on the assembly drawing, STEP origin and
   models, ODB++ components, iBOM contents, xlsx vs XYRS designators.
-- `kicad-macrofab-bom`: the per-designator MacroFab BOM xlsx (shared strings, byte-reproducible), the grouped and
+- `kicad-macrofab-bom`: the per-designator MacroFab BOM xlsx (shared strings, byte-reproducible with or without lxml
+  installed: openpyxl is kept on Python's own XML writer unless `OPENPYXL_LXML` is set), the grouped and
   per-reference BOM csvs, an optional per-designator diff against a baseline BOM xlsx, and a checks report with
   string-hygiene flags (odd MPN characters, house parts, manufacturer-name variants, value + package collisions,
-  groups that mix fitted and unfitted parts).
+  groups that mix fitted and unfitted parts) that points at the MacroFab walkthrough for checking the BOM lines
+  after the import.
 - `kicad-bom-check`: regenerates a commit's grouped BOM csv with a fixed kicad-cli recipe and compares it with a
   committed or local csv.
 - `kicad-bomdiff`: per-reference diff of two BOM csvs; a missing or unreadable file, a csv without a `Reference`
   column or a grouped BOM is a setup error (exit 2) with a one-line message.
 - `kicad-project-copy`: a checked KiCad project copy of a commit (or of the working tree), with an optional
-  library submodule.
+  library submodule. A library checkout (here and in `kicad-fab-export`'s 3-D models) is recognised by comparing
+  folders, not path strings, so a path that reaches the tools in another spelling (case, slash style, a Windows
+  short 8.3 name) still counts as that checkout.
 - Configuration through command-line flags, environment variables and an optional `kicad-fab.toml` /
   `kicad-fab.json` file. Configurable fiducial / mounting-hole recognition for the XYRS and the BOM, an optional
   requirement that the board has filled vias, and the labels used in the reports.

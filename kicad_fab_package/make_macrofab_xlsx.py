@@ -58,7 +58,9 @@ A commit on no branch or tag (a scratch commit) is reported as a warning: its ha
 Checks (exit 1 if one fails; the outputs are still written): schematic and board designator sets agree; per row, the
   sheet and the board footprint agree on footprint, Value, MPN, DNP and BOM flags; the BOM export agrees with the
   netlist; no Populate 1 row without an MPN; no unannotated or duplicate designator; --expect-fitted/--expect-unfitted.
-The xlsx is byte-reproducible for a commit: zip timestamps and document dates are the commit date.
+The xlsx is byte-reproducible for a commit and an openpyxl version: zip timestamps and document dates are the commit
+  date, and openpyxl writes with Python's own XML writer, not lxml, whether or not lxml is installed (the tool sets
+  OPENPYXL_LXML=False when it is unset; OPENPYXL_LXML=True brings lxml back: the same cells, different bytes).
 Needs openpyxl. Exit 0 OK, 1 a check failed, 2 setup error.
 """
 import argparse
@@ -84,6 +86,11 @@ except ImportError:  # imported as a plain module from its folder
     import kproject  # noqa: F401
     import sexp  # noqa: F401
 
+# openpyxl writes through lxml when lxml is installed, and its lxml and standard-library writers serialize the same
+# workbook to different bytes (same cells). Pick the standard-library writer unless OPENPYXL_LXML is already set, so the
+# xlsx of a commit has the same bytes with or without lxml. openpyxl reads the variable once, on its first import.
+os.environ.setdefault('OPENPYXL_LXML', 'False')
+
 try:
     import openpyxl
     from openpyxl.styles import Alignment, Font
@@ -105,6 +112,10 @@ NON_PART_RE = re.compile(r'^(FID|H)\d+$')
 MPN_CHARS = re.compile(r'[A-Za-z0-9.\-+#_]')   # '/' is flagged: some vendors' MPNs carry it legitimately
 # manufacturer names MacroFab's part library spells differently
 KNOWN_RENAMES = {'cui devices': 'CUI Devices is now Same Sky; MacroFab lists Same Sky'}
+# where the checks report sends the reader about BOM lines after the import (how MacroFab groups them is MacroFab's
+# to change, so the report states no rule)
+LINE_GROUPING = ('see "Line grouping and Populate", section 7 of the MacroFab walkthrough, docs/macrofab.md in '
+                 'kicad-fab-package')
 MFR_NOISE = {'inc', 'incorporated', 'corp', 'corporation', 'co', 'ltd', 'llc', 'limited', 'gmbh', 'ag', 'sa', 'plc',
              'group', 'company', 'technology', 'technologies', 'electronics', 'semiconductor', 'semiconductors',
              'components', 'international', 'intl', 'america', 'americas', 'usa', 'the'}
@@ -466,7 +477,8 @@ def hygiene(rows):
         if r['MPN']:
             by_mpn[r['MPN']].add(r['Manufacturer'])
     h['mpn_two_mfrs'] = sorted((m, sorted(s)) for m, s in by_mpn.items() if len(s) > 1)
-    # MacroFab groups BOM lines by Value + package: fitted rows that would share a line with different MPNs
+    # fitted rows with the same Value + package but different MPNs: if a BOM line ever held them all, it would carry one
+    # MPN for all of them (how MacroFab groups lines is its own to change: docs/macrofab.md section 7)
     grp = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rows:
         if r['Populate'] == 1:
@@ -789,19 +801,19 @@ def checks_md(name, rev_label, cli_version, cmds, rows, res, h, expect_lines, ba
             lambda t: '| %s | %s |' % (md(t[0]), md(t[1])))
     section('Same MPN under different Manufacturer names', h['mpn_two_mfrs'], '| MPN | Manufacturers |',
             lambda t: '| %s | %s |' % (md(t[0]), ', '.join('`%s`' % md(x) for x in t[1])))
-    section('Value + footprint collisions (MacroFab groups BOM lines by Value + package)', h['collisions'],
+    section('Value + footprint collisions (same Value and footprint, different MPNs)', h['collisions'],
             '| Value | Footprint | MPN: designators |',
             lambda t: '| %s | %s | %s |' % (
                 md(t[0][0]), md(t[0][1]), md('; '.join('%s: %s' % (m or '(none)', compress_refs(v)) for m, v in t[1]))))
     if h['collisions']:
-        L.extend(['After the import, check that each of these designators keeps its own MPN (Ungroup / New Group in '
-                  'MacroFab\'s BOM tab if not).', ''])
+        L.extend(['After the import, check that each of these designators keeps its own MPN (%s).' % LINE_GROUPING,
+                  ''])
     section('Value + footprint groups that mix fitted and Populate 0 rows', h['mixed_populate'],
             '| Value | Footprint | Populate 1 | Populate 0 |',
             lambda t: '| %s | %s | %s | %s |' % (md(t[0][0]), md(t[0][1]), compress_refs(t[1]), compress_refs(t[2])))
     if h['mixed_populate']:
         L.extend(['After the import, check every Populate 0 designator above by name: it must stay Do Not Place, and '
-                  'the fitted ones must stay fitted (Ungroup if MacroFab merged the line).', ''])
+                  'the fitted ones must stay fitted (%s).' % LINE_GROUPING, ''])
     return '\n'.join(L).rstrip('\n') + '\n'
 
 

@@ -42,6 +42,7 @@ ERROR: ../fab/v1.1/bom/pic_programmer_v1.1_bom.csv: a grouped BOM (Reference 'C6
 | `KICAD_PYTHON`, `KICAD10_PYTHON` | export | KiCad's Python (the one that can `import pcbnew`), first one set wins |
 | `KICAD10_3DMODEL_DIR` | export | KiCad's 3-D model library, passed to kicad-cli as `KICAD9_3DMODEL_DIR` and `KICAD10_3DMODEL_DIR` |
 | `KICAD_FAB_CONFIG` | all but `kicad-bomdiff` | the config file, when `--config` is not given |
+| `OPENPYXL_LXML` | BOM | openpyxl's own switch. `kicad-macrofab-bom` sets it to `False` when it is not set, so the xlsx has the same bytes with or without lxml installed; `True` lets openpyxl write through lxml (same cells, different bytes). See [the xlsx](bom.md#the-xlsx) |
 
 Auto-detection, when neither the flag nor the variable is set:
 

@@ -49,7 +49,8 @@ assembly PDF and the STEP model are what you send when MacroFab asks a placement
 As observed on 2026-10-25, the upload opens an import wizard. Its first step lists the files it took for a BOM (the
 xlsx; keep it). The next step, **Confirm Files**, lists every other file with the layer type MacroFab detected and lets
 you change a type or leave a file out; the drill files also get their plating and fill options there (next section).
-**Import** then writes the files into the PCB version. Check every row against `fab/NAME_layer_map.csv`:
+**Import** then writes the files into the PCB version. Check every Gerber and drill row against
+`fab/NAME_layer_map.csv`:
 
 | Upload file | Must be mapped to |
 |---|---|
@@ -64,7 +65,6 @@ you change a type or leave a file out; the drill files also get their plating an
 | `BASE_PTH_FILLED.XLN` | plated drill (the filled vias; see the next step) |
 | `BASE_NPTH.XLN` | non-plated drill |
 | `BASE.XYRS` | placement (XYRS) |
-| `BASE_macrofab.xlsx` | bill of materials |
 
 Also check the layer count MacroFab derives from the copper files (2 for the demo), and look at the board in
 MacroFab's viewer: the drills must sit on their pads (the export already checked that every plated hit sits on a
@@ -147,8 +147,8 @@ on a line of their own. Grouping is MacroFab's to change, so check the two risky
 checks report (`bom/NAME_bom_checks.md`) lists both before you upload:
 
 - **Value + footprint collisions**: fitted parts with the same Value and footprint but different MPNs (the demo's
-  v1.1 has `R5` at `DEMO-R-10K-1PCT` among `R1`-`R7` at `DEMO-R-10K`). Check that each of these designators kept its
-  own MPN.
+  v1.1 has `R5` at `DEMO-R-10K-1PCT` among `R1`-`R4`, `R6`-`R7` at `DEMO-R-10K`). Check that each of these
+  designators kept its own MPN.
 - **Mixed-Populate groups**: fitted and Populate 0 parts with the same Value and footprint (the demo's v1.0 has `R21`,
   DNP, among the fitted `R12`-`R14`). Check every Populate 0 designator by name: it must still be Do Not Place, and
   the fitted ones must still be fitted. A line's quantity (places x boards) is a quick cross-check.
@@ -173,7 +173,7 @@ As observed on 2026-10-25, each BOM line also has a parts panel (the search icon
 - **Priority**: **Price** takes the cheapest allowed part with stock; **Fixed** uses your order (arrows reorder the
   rows). Adding a component switched the line to Fixed in the session observed. Set Fixed, with only the designed
   part, on every line that must not be substituted.
-- **Add a Component** searches MacroFab's market by MPN (stock and price per maker); **Suggested Alternates** lists
+- **Add Component** searches MacroFab's market by MPN (stock and price per maker); **Suggested Alternates** lists
   MacroFab's own suggestions; the trash icon removes an allowed part.
 
 Whichever way you add alternates:
@@ -217,8 +217,10 @@ When the quote page reports components missing availability, **Request Part Sour
 Order page) hands those lines to MacroFab's buyers. As observed on 2026-10-25 it opens a review with the lead time,
 the order quantity, the order price without the requested parts and a notes field per part, then **Submit Request**;
 MacroFab says to contact support if there is no reply within 24 business hours. Use the notes to pin what is
-acceptable (exact MPN only, authorized or traceable sources, the quantity you may need), and set any part you will
-supply yourself to **Me** first so it is not included.
+acceptable (exact MPN only, authorized or traceable sources, the quantity you may need). Set any part you will
+supply yourself to **Me** in the same visit, right before **Request Part Sourcing**, and check that the review lists
+only the lines MacroFab should buy (the **Me** choice did not survive a reload; see
+[consigned parts](#9-consigned-parts)).
 
 ## The DFM email
 

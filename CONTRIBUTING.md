@@ -22,6 +22,10 @@ python -m pytest -rs
 ```
 
 - The unit tests use synthetic fixtures only and need no KiCad (they do need `git` on `PATH`).
+- `tests/test_docs.py` checks the docs against the tools' own text and against each other (for example the checks
+  report lines that `docs/bom.md` quotes). When a message changes, re-run the docs example and paste the real output.
+  It also checks that the newest release heading in `CHANGELOG.md` is the package's `__version__`, so a release adds
+  its entry above the older ones and bumps the version in the same change.
 - `tests/test_integration_kicad.py` commits KiCad's bundled `pic_programmer` demo (or the project folder named by
   `KFP_TEST_KICAD_PROJECT`) into a scratch repository and runs the whole flow. It skips itself, with the reason, when
   KiCad 10 is not found; set `KFP_SKIP_INTEGRATION=1` to skip it on purpose.

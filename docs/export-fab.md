@@ -352,4 +352,5 @@ Some behaviours look like shortcuts but are on purpose:
 Re-running a commit reproduces the XYRS, the position file, the layer map, the BOM xlsx and csvs and the reports byte
 for byte. Gerbers, drill files, the Gerber job, the drill report and the PDFs differ only in the timestamps KiCad
 writes into them (and so does the upload zip's content). KiCad's STEP and ODB++ writers also renumber entities and
-reorder features between runs, so compare those structurally. The xlsx is reproducible for a given openpyxl version.
+reorder features between runs, so compare those structurally. The xlsx is reproducible for a given openpyxl version,
+with or without lxml installed (see [the xlsx](bom.md#the-xlsx) for `OPENPYXL_LXML`).

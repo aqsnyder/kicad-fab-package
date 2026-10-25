@@ -1,5 +1,8 @@
 import datetime
+import importlib.util
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -12,6 +15,24 @@ try:
     import openpyxl
 except ImportError:
     openpyxl = None
+
+HAVE_LXML = importlib.util.find_spec('lxml') is not None
+# the folder that holds the kicad_fab_package these tests imported, for a fresh interpreter to import the same code
+PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(mx.__file__)))
+
+
+def fresh_python(code, *args, **env_set):
+    """Run code in a new interpreter (openpyxl picks its XML writer once, on its first import), with OPENPYXL_LXML
+    unset unless given. Returns stdout."""
+    env = {k: v for k, v in os.environ.items() if k != 'OPENPYXL_LXML'}
+    env.update(env_set)
+    env['PYTHONPATH'] = os.pathsep.join([PKG_ROOT] + ([env['PYTHONPATH']] if env.get('PYTHONPATH') else []))
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    r = subprocess.run([sys.executable, '-c', code] + list(args), capture_output=True, text=True, env=env,
+                       cwd=PKG_ROOT)
+    if r.returncode != 0:
+        raise AssertionError('fresh interpreter failed:\n%s%s' % (r.stdout, r.stderr))
+    return r.stdout.strip()
 
 
 def comp(ref, value, footprint, mpn='', manufacturer='', dnp=False, excl_bom=False, excl_board=False, **fields):
@@ -204,6 +225,23 @@ class ReportsTest(unittest.TestCase):
         self.assertIn('| As-built baseline |', md)
         self.assertNotIn('no branch or tag', md)
 
+    def test_grouping_advice_states_no_macrofab_rule(self):
+        # how MacroFab groups BOM lines is MacroFab's to change: the report flags the facts and points at the
+        # walkthrough, without a grouping rule or a button the walkthrough does not describe
+        bom, comps, fps = design()
+        rows, res = mx.build_rows(bom, comps, [], fps)
+        h = mx.hygiene(rows)
+        self.assertTrue(h['collisions'] and h['mixed_populate'])
+        md = mx.checks_md('board_v1.2', 'commit `abc`', '10.0.7', ['kicad-cli ...'], rows, res, h, [], refs=['x'])
+        self.assertIn('### Value + footprint collisions (same Value and footprint, different MPNs) (1)\n', md)
+        self.assertIn('### Value + footprint groups that mix fitted and Populate 0 rows (1)\n', md)
+        for claim in ('groups BOM lines by', 'grouped by', 'Ungroup', 'New Group', 'merged the line'):
+            self.assertFalse(claim in md, 'the report still says %r' % claim)
+        pointer = '(see "Line grouping and Populate", section 7 of the MacroFab walkthrough, docs/macrofab.md in ' \
+                  'kicad-fab-package).'
+        self.assertIn('check that each of these designators keeps its own MPN ' + pointer, md)
+        self.assertIn('the fitted ones must stay fitted ' + pointer, md)
+
     def test_no_baseline_configured(self):
         self.assertEqual(mx.load_baseline(None, '.', 'abc', 'board'), (None, None, [], []))
 
@@ -256,6 +294,52 @@ class XlsxTest(unittest.TestCase):
         self.assertEqual(base['R1']['Populate'], 0)
         self.assertEqual(alts, [('C1', 'ALT1', 'AltCo')])
         self.assertEqual(dups, ['C1'])
+
+
+# writes the rows of XlsxTest to argv[1]; argv[2] == 'no-lxml' hides lxml as if it were not installed
+WRITE_XLSX = '''
+import datetime, sys
+if sys.argv[2] == 'no-lxml':
+    sys.modules['lxml'] = None
+from kicad_fab_package import make_macrofab_xlsx as mx
+import openpyxl.xml
+rows = [{'Designator': 'C1', 'Value': '100n', 'Footprint': 'C_0402', 'Populate': 1, 'MPN': 'GRM',
+         'Manufacturer': 'Murata'},
+        {'Designator': 'R1', 'Value': '=1k', 'Footprint': 'R_0603', 'Populate': 0, 'MPN': '',
+         'Manufacturer': ' lead space'}]
+mx.write_xlsx(sys.argv[1], rows, datetime.datetime(2026, 1, 2, 3, 4, 6), 'T', 'D')
+print(openpyxl.xml.LXML)
+'''
+
+
+@unittest.skipIf(openpyxl is None, 'openpyxl not installed')
+class XmlWriterTest(unittest.TestCase):
+    """openpyxl's lxml and standard-library writers give different bytes for the same cells, so the tool picks the
+    standard-library one unless OPENPYXL_LXML says otherwise."""
+
+    def test_standard_library_writer_unless_the_environment_chooses(self):
+        code = ('import os\nimport kicad_fab_package.make_macrofab_xlsx\nimport openpyxl.xml as x\n'
+                'print(os.environ.get("OPENPYXL_LXML"), x.LXML, x.lxml_available())')
+        self.assertEqual(fresh_python(code).split()[:2], ['False', 'False'])
+        env, lxml, available = fresh_python(code, OPENPYXL_LXML='True').split()
+        self.assertEqual(env, 'True')                   # an explicit choice is kept
+        self.assertEqual(lxml, available)               # lxml when it is installed
+
+    @unittest.skipUnless(HAVE_LXML, 'lxml not installed: nothing to compare')
+    def test_same_bytes_with_and_without_lxml(self):
+        tmp = tempfile.mkdtemp(prefix='kfp_lxml_')
+        try:
+            out, writer = {}, {}
+            for mode in ('lxml', 'no-lxml'):
+                p = os.path.join(tmp, mode + '.xlsx')
+                writer[mode] = fresh_python(WRITE_XLSX, p, mode)                # openpyxl.xml.LXML
+                with open(p, 'rb') as f:
+                    out[mode] = f.read()
+            self.assertEqual(len(out['lxml']), len(out['no-lxml']))
+            self.assertEqual(out['lxml'], out['no-lxml'])
+            self.assertEqual(writer, {'lxml': 'False', 'no-lxml': 'False'})
+        finally:
+            rmtree(tmp)
 
 
 class SourcesTest(unittest.TestCase):

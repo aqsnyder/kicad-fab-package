@@ -45,7 +45,10 @@ One sheet, a header row, one designator per row in natural order (`C2` before `C
 Leading and trailing whitespace is stripped (and listed in the report); nothing else in a field is changed. Text
 cells are shared strings and empty fields are absent cells, like an xlsx MacroFab exports (openpyxl on its own writes
 inline strings and empty cells). A value that starts with `=` is written as text, never as a formula. Dates inside
-the file are the commit date, so the xlsx of a commit is byte-reproducible for a given openpyxl version.
+the file are the commit date, so the xlsx of a commit is byte-reproducible for a given openpyxl version, whether or
+not lxml is installed: openpyxl writes through lxml when it can, and its lxml writer gives other bytes for the same
+cells, so `kicad-macrofab-bom` sets `OPENPYXL_LXML=False` (when the variable is not already set) to keep openpyxl on
+Python's own XML writer. Setting `OPENPYXL_LXML=True` yourself brings lxml back: the same cells, different bytes.
 
 There is no alternate MPN / Manufacturer pair: alternates are handled on MacroFab's side (see
 [the walkthrough](macrofab.md#8-approved-alternates-and-line-priority)).
@@ -117,7 +120,7 @@ with no row, the checks, and these **flags** (reported, never fixed for you):
 | Manufacturer names, and name variants | the same maker spelled two ways (`Demo Parts`, `Demo Parts Inc.`) can confuse sourcing |
 | Manufacturer names MacroFab spells differently | a known rename (for example *CUI Devices* is listed as *Same Sky*) |
 | Same MPN under different Manufacturer names | as name variants |
-| Value + footprint collisions | MacroFab groups BOM lines by Value + package: fitted rows with the same Value and footprint but different MPNs could be merged into one line with one MPN |
+| Value + footprint collisions | fitted rows with the same Value and footprint but different MPNs: a BOM line that held them all would carry one MPN for all of them. Grouping is MacroFab's to change, so check each designator's MPN after the import ([line grouping and Populate](macrofab.md#7-line-grouping-and-populate)) |
 | Value + footprint groups that mix fitted and Populate 0 rows | if a grouped line carried one Populate for all its designators, a DNP part would be fitted or fitted parts dropped |
 
 From the demo's v1.1 report:
@@ -129,13 +132,13 @@ From the demo's v1.1 report:
 |---|---|---|---|
 | R10 | `DEMO-R-5,1K` | `,` | baseline MPN `DEMO-R-5-1K` |
 ...
-### Value + footprint collisions (MacroFab groups BOM lines by Value + package) (1)
+### Value + footprint collisions (same Value and footprint, different MPNs) (1)
 
 | Value | Footprint | MPN: designators |
 |---|---|---|
 | 10K | R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal | DEMO-R-10K: R1-R4, R6-R7; DEMO-R-10K-1PCT: R5 |
 
-After the import, check that each of these designators keeps its own MPN (Ungroup / New Group in MacroFab's BOM tab if not).
+After the import, check that each of these designators keeps its own MPN (see "Line grouping and Populate", section 7 of the MacroFab walkthrough, docs/macrofab.md in kicad-fab-package).
 ```
 
 ### The mixed-Populate report
@@ -149,7 +152,7 @@ In v1.0 of the demo, `R21` is a DNP 470 ohm resistor with the same Value and foo
 |---|---|---|---|
 | 470 | R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal | R12-R14 | R21 |
 
-After the import, check every Populate 0 designator above by name: it must stay Do Not Place, and the fitted ones must stay fitted (Ungroup if MacroFab merged the line).
+After the import, check every Populate 0 designator above by name: it must stay Do Not Place, and the fitted ones must stay fitted (see "Line grouping and Populate", section 7 of the MacroFab walkthrough, docs/macrofab.md in kicad-fab-package).
 ```
 
 This is the classic "only some of the 0 ohm straps are fitted" case. The xlsx is right (one row per designator, each
