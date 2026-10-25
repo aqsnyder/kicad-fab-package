@@ -10,6 +10,11 @@ import os
 import subprocess
 import tarfile
 
+try:
+    from .kproject import same_dir
+except ImportError:  # imported as a plain module from its folder
+    from kproject import same_dir
+
 
 class ModelLibraryError(Exception):
     pass
@@ -43,8 +48,7 @@ def library_models(top, rev, worktree, proj, project_dir, library_dir, model_pat
     paths = list(model_paths or [])
     for lib in cands:
         r = subprocess.run(['git', '-C', lib, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-        own = r.returncode == 0 and os.path.normcase(os.path.abspath(r.stdout.strip())) == os.path.normcase(
-            os.path.abspath(lib))
+        own = r.returncode == 0 and bool(r.stdout.strip()) and same_dir(r.stdout.strip(), lib)
         if own and subprocess.run(['git', '-C', lib, 'cat-file', '-e', sha + '^{commit}'],
                                   capture_output=True).returncode == 0:
             data = subprocess.run(['git', '-C', lib, 'archive', '--format=tar', sha] + (['--'] + paths if paths else []),

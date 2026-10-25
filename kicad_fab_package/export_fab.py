@@ -737,7 +737,7 @@ def step_project(C):
         lib_sha = kproject.gitlink(C.repo, C.sha, kproject.under(C.project_dir, libdir))
         common = kproject.git(C.repo, 'rev-parse', '--path-format=absolute', '--git-common-dir')
         main_co = os.path.dirname(os.path.abspath(common))
-        if os.path.normcase(main_co) != os.path.normcase(C.top):
+        if not kproject.same_dir(main_co, C.top):
             lib = kproject.add_library(main_co, C.project_dir, lib_sha, C.proj_root, 'auto', libdir, s.library_paths)
     C.proj = os.path.dirname(info['board'])
     C.board, C.pname = info['board'], info['name']

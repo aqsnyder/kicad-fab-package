@@ -39,6 +39,14 @@ def new_repo(path):
     return path
 
 
+def short_path(path):
+    """Windows short (8.3) form of an existing path, or None where Windows gives none."""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(1024)
+    n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf))
+    return buf.value if 0 < n < len(buf) else None
+
+
 PROJECT = {
     'myboard.kicad_pro': '{}',
     'myboard.kicad_pcb': '(kicad_pcb (version 20250000))\n',
@@ -187,6 +195,24 @@ class LibraryTest(unittest.TestCase):
         self.assertEqual(kproject.gitlink(self.repo, 'HEAD', 'hw/parts'), self.lib_sha)
         self.assertEqual(kproject.gitlink(self.repo, None, 'hw/parts'), self.lib_sha)
         self.assertIsNone(kproject.gitlink(self.repo, 'HEAD', 'hw/none'))
+
+    def test_same_dir(self):
+        lib = os.path.join(self.repo, 'hw', 'parts')
+        self.assertTrue(kproject.same_dir(lib, os.path.join(self.repo, 'hw', '.', 'parts')))
+        self.assertTrue(kproject.same_dir(lib.replace('\\', '/'), lib))
+        self.assertFalse(kproject.same_dir(lib, self.repo))
+        self.assertFalse(kproject.same_dir(lib, os.path.join(self.tmp, 'missing')))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows short (8.3) names')
+    def test_build_from_a_short_name_path(self):
+        # GitHub's Windows runners hand out temp folders as C:/Users/RUNNER~1/...: git reports the library's
+        # top level in long form, so a plain string compare took the initialised library for a missing one.
+        short = short_path(self.repo)
+        if not short or os.path.normcase(short) == os.path.normcase(self.repo):
+            self.skipTest('no distinct 8.3 name on this volume')
+        info = kproject.build(os.path.join(self.tmp, 'copy_short'), short, rev='HEAD', library_dir='parts',
+                              library_paths=['footprints'])
+        self.assertEqual(info['library'], 'library: 1 files of parts %s (footprints)' % self.lib_sha[:9])
 
     def test_build_adds_the_library(self):
         dest = os.path.join(self.tmp, 'copy')

@@ -139,6 +139,15 @@ def detect_project_dir(repo, rev=None):
     return norm_project_dir(os.path.dirname(pros[0]).replace('\\', '/'))
 
 
+def same_dir(a, b):
+    """True when a and b name the same folder. Compares the folders themselves, so case, slash style and Windows
+    short (8.3) names such as C:/Users/RUNNER~1 cannot make one folder look like two."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
 def gitlink(repo, rev, path):
     """Commit sha a submodule path points at, in a commit (rev) or in the index (rev None)."""
     if rev is None:
@@ -163,8 +172,7 @@ def add_library(repo, project_dir, sha, dest, mode, library_dir=None, paths=None
     lib = os.path.join(repo, project_dir, *library_dir.split('/'))
     # an uninitialised submodule is an empty directory, and `git -C` would then walk up to the superproject
     top = subprocess.run(['git', '-C', lib, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-    own_repo = (top.returncode == 0 and
-                os.path.normcase(os.path.abspath(top.stdout.strip())) == os.path.normcase(os.path.abspath(lib)))
+    own_repo = top.returncode == 0 and bool(top.stdout.strip()) and same_dir(top.stdout.strip(), lib)
     have = bool(sha) and own_repo and subprocess.run(['git', '-C', lib, 'cat-file', '-e', sha + '^{commit}'],
                                                      capture_output=True).returncode == 0
     if not have:
