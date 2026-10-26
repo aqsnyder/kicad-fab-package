@@ -279,6 +279,21 @@ class XlsxTest(unittest.TestCase):
         self.assertEqual(got[2], ['R1', '=1k', 'R_0603', 0, None, ' lead space'])   # text, never a formula
         self.assertEqual(ws['B3'].data_type, 's')
 
+    def test_other_columns_creator_and_width(self):
+        # kicad-fab-export's PCBWay BOM goes through the same writer
+        cols = ['Item #', '*Designator', 'Notes']
+        rows = [{'Item #': 1, '*Designator': ', '.join('C%d' % i for i in range(1, 40)), 'Notes': ''}]
+        p = os.path.join(self.tmp, 'p.xlsx')
+        mx.write_xlsx(p, rows, datetime.datetime(2026, 1, 2, 3, 4, 6), 'T', 'D', columns=cols, creator='x.py',
+                      max_width=60)
+        wb = openpyxl.load_workbook(p)
+        ws = wb.worksheets[0]
+        self.assertEqual([[c.value for c in r] for r in ws.iter_rows()], [cols, [1, rows[0]['*Designator'], None]])
+        self.assertEqual((ws.column_dimensions['A'].width, ws.column_dimensions['B'].width), (8, 60))
+        self.assertEqual(wb.properties.creator, 'x.py')
+        with zipfile.ZipFile(p) as z:
+            self.assertIn('xl/sharedStrings.xml', z.namelist())
+
     def test_load_baseline_from_file(self):
         p = os.path.join(self.tmp, 'base.xlsx')
         wb = openpyxl.Workbook()

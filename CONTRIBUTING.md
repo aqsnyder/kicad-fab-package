@@ -27,8 +27,10 @@ python -m pytest -rs
   It also checks that the newest release heading in `CHANGELOG.md` is the package's `__version__`, so a release adds
   its entry above the older ones and bumps the version in the same change.
 - `tests/test_integration_kicad.py` commits KiCad's bundled `pic_programmer` demo (or the project folder named by
-  `KFP_TEST_KICAD_PROJECT`) into a scratch repository and runs the whole flow. It skips itself, with the reason, when
-  KiCad 10 is not found; set `KFP_SKIP_INTEGRATION=1` to skip it on purpose.
+  `KFP_TEST_KICAD_PROJECT`) into a scratch repository and runs the whole flow, then runs the export again on a copy
+  laid out as kicad-project-template lays out a repository (`hw/demo/` beside the library folder `hw/lib/`), with a
+  round outline and `--pcbway`. It skips itself, with the reason, when KiCad 10 is not found; set
+  `KFP_SKIP_INTEGRATION=1` to skip it on purpose.
 - To make sure nothing is auto-detected (as on CI, which has no KiCad), point the KiCad paths at a file that does not
   exist: a path given in `KICAD_CLI` / `KICAD_PYTHON` is used as it is, so detection never runs:
 

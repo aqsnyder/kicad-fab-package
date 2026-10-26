@@ -167,7 +167,9 @@ lines are facts for the order, not problems: this one belongs in the [DFM email]
 ```
 
 With `--ibom-pkg` there is also `assembly/pic_programmer_v1.0_ibom.html`; with a baseline BOM there is also
-`bom/pic_programmer_v1.0_vs_<label>.md`. [kicad-fab-export](export-fab.md#output-files) describes every file.
+`bom/pic_programmer_v1.0_vs_<label>.md`; with `--pcbway` there are also the [PCBWay](pcbway.md) files
+`assembly/pic_programmer_v1.0_pcbway_bom.xlsx`, `assembly/pic_programmer_v1.0_pcbway_top.csv`,
+`assembly/pic_programmer_v1.0_pcbway_bottom.csv` and `pic_programmer_v1.0_pcbway_gerbers.zip`. [kicad-fab-export](export-fab.md#output-files) describes every file.
 
 ## 6. After the export
 

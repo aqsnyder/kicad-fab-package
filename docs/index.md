@@ -1,11 +1,12 @@
 # kicad-fab-package documentation
 
 kicad-fab-package turns one git commit of a KiCad 10 project into the files an assembly house needs, checks them
-against each other and against the design, and packs the upload for [MacroFab](https://macrofab.com).
+against each other and against the design, and packs the upload for [MacroFab](https://macrofab.com) (and, on
+request, the BOM, centroid files and Gerber zip for [PCBWay](https://www.pcbway.com)).
 
 | Command | What it does | Page |
 |---|---|---|
-| `kicad-fab-export` | Gerbers, drills (filled vias split out), XYRS, position file, assembly / schematic PDFs, STEP, ODB++, iBOM, the upload zip and a manifest | [export-fab.md](export-fab.md) |
+| `kicad-fab-export` | Gerbers, drills (filled vias split out), XYRS, position file, assembly / schematic PDFs, STEP, ODB++, iBOM, the upload zip and a manifest; with `--pcbway`, PCBWay's BOM, centroid files and Gerber zip | [export-fab.md](export-fab.md), [pcbway.md](pcbway.md) |
 | `kicad-macrofab-bom` | MacroFab BOM xlsx, grouped and per-reference BOM csvs, a diff against a baseline BOM, a checks report | [bom.md](bom.md) |
 | `kicad-bom-check` | regenerate a commit's grouped BOM csv with a fixed recipe and compare it with a committed or local csv | [bom.md](bom.md#kicad-bom-check) |
 | `kicad-bomdiff` | per-reference diff of two BOM csvs | [bom.md](bom.md#kicad-bomdiff) |
@@ -20,11 +21,13 @@ against each other and against the design, and packs the upload for [MacroFab](h
    specifications, the BOM upload, line grouping and Populate, alternates, consigned parts and the DFM email.
 4. [XYRS placement format](xyrs.md): units, origin, position, rotation, sides, types and body offsets, with a worked
    example.
-5. [BOM tools](bom.md): the xlsx columns and row rules, the checks report, mixed-Populate groups, `kicad-bom-check`
+5. [PCBWay](pcbway.md): the PCBWay BOM, centroid files and Gerber zip that `--pcbway` adds, and how they relate to the
+   XYRS.
+6. [BOM tools](bom.md): the xlsx columns and row rules, the checks report, mixed-Populate groups, `kicad-bom-check`
    and `kicad-bomdiff`.
-6. [CLI reference](cli.md): every command, argument, default, environment variable and exit code.
-7. [Configuration](configuration.md): the config file and every key.
-8. [Troubleshooting / FAQ](troubleshooting.md): real error messages and their fixes.
+7. [CLI reference](cli.md): every command, argument, default, environment variable and exit code.
+8. [Configuration](configuration.md): the config file and every key.
+9. [Troubleshooting / FAQ](troubleshooting.md): real error messages and their fixes.
 
 ## The examples in these pages
 

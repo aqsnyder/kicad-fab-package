@@ -65,6 +65,7 @@ class LoadConfigTest(TmpDirTest):
         self.assertEqual(s.xyrs_non_part_refs, s.non_part_refs)       # inherited
         self.assertEqual(s.xyrs_non_part_libs, s.non_part_libs)
         self.assertFalse(s.require_filled_vias)
+        self.assertFalse(s.pcbway)
         self.assertIn('fiducials and mounting holes', s.pos_note_keeps)
 
     def test_non_part_and_note_settings(self):
@@ -102,6 +103,18 @@ class LoadConfigTest(TmpDirTest):
         self.assertEqual((s.require_dru, s.require_filled_vias), (False, False))
         s = config.resolve(parser().parse_args(['--require-filled-vias']), self.tmp)
         self.assertTrue(s.require_filled_vias)
+
+    def test_pcbway_key_and_flags(self):
+        p = self.write_json({'pcbway': True})
+        self.assertTrue(config.resolve(parser().parse_args(['--config', p]), self.tmp).pcbway)
+        self.assertFalse(config.resolve(parser().parse_args(['--config', p, '--no-pcbway']), self.tmp).pcbway)
+        self.assertTrue(config.resolve(parser().parse_args(['--pcbway']), self.tmp).pcbway)
+        with self.assertRaises(config.ConfigError):
+            config.load_config(self.write_json({'pcbway': 'yes'}, 'bad.json'))
+
+    def test_library_dir_beside_the_project_is_kept(self):
+        p = self.write_json({'library_dir': '..\\lib/'})
+        self.assertEqual(config.resolve(parser().parse_args(['--config', p]), self.tmp).library_dir, '../lib')
 
     def test_help_lists_both_flags_of_every_bool_key(self):
         listed = {line.split()[0] for line in parser().format_help().splitlines() if line.startswith('  -')}

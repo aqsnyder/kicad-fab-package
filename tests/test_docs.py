@@ -1,13 +1,18 @@
 """Consistency checks between the documentation, the tools' own text and the demo outputs the docs quote (no KiCad
 needed)."""
+import argparse
 import collections
 import os
 import re
+import shutil
+import tempfile
 import unittest
 
 from kicad_fab_package import __version__
+from kicad_fab_package import export_fab as ef
 from kicad_fab_package import make_macrofab_xlsx as mx
 
+from . import test_export_fab as tef
 from .test_macrofab_bom import design
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -140,6 +145,42 @@ class MacroFabWalkthroughTest(unittest.TestCase):
         self.assertIn('to **Me** in the same visit, right before **Request Part Sourcing**', sourcing)
         self.assertIn('check that the review lists only the lines MacroFab should buy', sourcing)
         self.assertNotIn('**Me** first', sourcing)
+
+
+def pcbway_check_names():
+    """The PCBWay check names the tool gives, from the synthetic package of the export tests."""
+    tmp = tempfile.mkdtemp(prefix='kfp_docs_')
+    try:
+        t = tef.StepPcbwayTest()
+        t.tmp = tmp
+        C = t.ctx()
+        ef.step_pcbway(C)
+        z = tef.UploadZipTest()
+        z.tmp = os.path.join(tmp, 'zip')
+        C2 = ef.Ctx(argparse.Namespace())
+        C2.out = z.tmp
+        ef.build_pcbway_zip(C2, z.make_package(), 0)
+        return [c['name'] for c in C.checks + C2.checks]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def placeholders(name):
+    """A check name with its counts and the docs' count letters (N, M, G, a, b, d) made '#'."""
+    return re.sub(r'\b(?:\d+(?:\.\d+)?|[NMGabd])\b', '#', name)
+
+
+@unittest.skipUnless(HAVE_DOCS, 'docs/ not present')
+class PcbwayDocsTest(unittest.TestCase):
+    def test_columns_are_the_tools(self):
+        text = read('docs', 'pcbway.md')
+        self.assertEqual(re.findall(r'^\| `([^`]+)` \|', section(text, 'The BOM'), re.M), ef.PCBWAY_BOM_COLUMNS)
+        self.assertIn('\n%s\n' % ','.join(ef.PCBWAY_CENTROID_COLUMNS), section(text, 'The centroid files'))
+
+    @unittest.skipIf(mx.openpyxl is None, 'openpyxl not installed')
+    def test_check_rows_are_the_tools_check_names(self):
+        rows = re.findall(r'^\| `(PCBWay [^`]+)` \| error \|', read('docs', 'export-fab.md'), re.M)
+        self.assertEqual([placeholders(r) for r in rows], [placeholders(n) for n in pcbway_check_names()])
 
 
 @unittest.skipUnless(os.path.isfile(os.path.join(ROOT, 'CHANGELOG.md')), 'CHANGELOG.md not present')

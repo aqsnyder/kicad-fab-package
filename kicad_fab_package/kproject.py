@@ -10,10 +10,13 @@ DEST            empty or new directory; the project lands in DEST/<project-dir>/
 --repo          the git repository (default: current directory)
 --project-dir   the project folder inside the repo, "." for the top level (default: auto-detected, the folder of the
                 only .kicad_pro that has a .kicad_pcb of the same name beside it, at REV)
---library       auto (default): add the library submodule (--library-dir) at the gitlink commit when the submodule
-                checkout has that commit, else carry on without it; yes: required; no: skip.
+--library       auto (default): add the library (--library-dir) when it is there: a submodule at the gitlink commit
+                when the submodule checkout has that commit, a plain folder of the repository from the same commit
+                (with --worktree, from the working tree); else carry on without it. yes: required; no: skip.
                 Exports and DRC do not need it; ERC and footprint-library checks do.
---library-dir   the library submodule folder, relative to the project folder (default: none)
+--library-dir   the library folder, relative to the project folder (default: none): a git submodule, or a plain folder
+                of the repository such as ../lib (hw/lib beside hw/<board>/, which the project reaches as
+                ${KIPRJMOD}/../lib). It lands at the same place relative to the project in the copy.
 --library-paths the folders of the library to copy (default: the whole library)
 --require-dru   fail unless the copy has <project>.kicad_dru (default: the design-rules file is optional)
 --full          copy every tracked file of the project directory (default: only what KiCad reads for DRC, ERC,
@@ -26,6 +29,7 @@ import argparse
 import datetime
 import io
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -73,6 +77,28 @@ def norm_project_dir(project_dir):
 def under(project_dir, rel):
     """rel inside the project folder, repo-relative (project_dir '' = the top level)."""
     return '%s/%s' % (project_dir, rel) if project_dir else rel
+
+
+def library_path(project_dir, library_dir):
+    """The library folder, repo-relative with '/' separators: library_dir taken from the project folder, so '../lib'
+    from 'hw/board' is 'hw/lib'. Raises ProjectError when that is the top level or outside the repository."""
+    p = posixpath.normpath(under(project_dir, library_dir.replace('\\', '/')))
+    if p in ('.', '..') or p.startswith(('../', '/')):
+        raise ProjectError('library folder %r from the project folder %r is %s, not a folder inside the repository'
+                           % (library_dir, project_dir or '.', 'the top level' if p == '.' else 'outside it'))
+    return p
+
+
+def library_kind(repo, rev, path):
+    """How the repo-relative library folder path is stored at commit rev (None: in the index): 'submodule' (a
+    gitlink), 'folder' (files of this repository) or None (nothing there)."""
+    if gitlink(repo, rev, path):
+        return 'submodule'
+    if rev is None:
+        names = git(repo, 'ls-files', '--', path)
+    else:
+        names = git(repo, 'ls-tree', '-r', '--name-only', rev, '--', path)
+    return 'folder' if names.strip() else None
 
 
 def _pathspec(project_dir):
@@ -160,7 +186,8 @@ def gitlink(repo, rev, path):
 
 
 def add_library(repo, project_dir, sha, dest, mode, library_dir=None, paths=None):
-    """Extract the library submodule <project_dir>/<library_dir> at commit sha into the copy; returns a status."""
+    """Extract the library submodule <project_dir>/<library_dir> at commit sha into the copy; returns a status. sha
+    None: there is no gitlink (and no folder: add_library_folder handles one)."""
     if mode == 'no':
         return 'library: skipped'
     if not library_dir:
@@ -169,20 +196,62 @@ def add_library(repo, project_dir, sha, dest, mode, library_dir=None, paths=None
                                '(--library-dir)')
         return 'library: none configured'
     paths = list(paths or [])
-    lib = os.path.join(repo, project_dir, *library_dir.split('/'))
+    rel = library_path(project_dir, library_dir)
+    if not sha:
+        msg = f'library: no submodule or folder at {rel}'
+        if mode == 'yes':
+            raise ProjectError(msg)
+        return msg + ' -> continuing without it (DRC does not need it)'
+    lib = os.path.join(repo, *rel.split('/'))
     # an uninitialised submodule is an empty directory, and `git -C` would then walk up to the superproject
     top = subprocess.run(['git', '-C', lib, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     own_repo = top.returncode == 0 and bool(top.stdout.strip()) and same_dir(top.stdout.strip(), lib)
-    have = bool(sha) and own_repo and subprocess.run(['git', '-C', lib, 'cat-file', '-e', sha + '^{commit}'],
-                                                     capture_output=True).returncode == 0
+    have = own_repo and subprocess.run(['git', '-C', lib, 'cat-file', '-e', sha + '^{commit}'],
+                                       capture_output=True).returncode == 0
     if not have:
         msg = f'library: commit {sha} not available in {lib}'
         if mode == 'yes':
             raise ProjectError(msg)
         return msg + ' -> continuing without it (DRC does not need it)'
     data = git(lib, 'archive', '--format=tar', sha, *(['--'] + paths if paths else []), binary=True)
-    n = extract_tar(data, os.path.join(dest, project_dir, *library_dir.split('/')))
+    n = extract_tar(data, os.path.join(dest, *rel.split('/')))
     return f'library: {n} files of {library_dir} {sha[:9]} ({", ".join(paths) if paths else "whole tree"})'
+
+
+def add_library_folder(repo, rev, project_dir, dest, mode, library_dir, paths=None):
+    """Copy a library that is a plain folder of the repository (no submodule), such as library_dir '../lib' beside the
+    project folder, into the copy at the same place relative to the project: from commit rev with git archive, or
+    from the working tree (rev None: the files in the index). Returns a status."""
+    if mode == 'no':
+        return 'library: skipped'
+    lib = library_path(project_dir, library_dir)
+    paths = list(paths or [])
+    specs = ['%s/%s' % (lib, p.replace('\\', '/').strip('/')) for p in paths] or [lib]
+    if rev is None:
+        names = git(repo, 'ls-files', '--', *specs).splitlines()
+    else:
+        names = git(repo, 'ls-tree', '-r', '--name-only', rev, '--', *specs).splitlines()
+    names = [n for n in names if n]
+    if not names:
+        msg = f'library: folder {lib} has no files{" in " + ", ".join(paths) if paths else ""}'
+        if mode == 'yes':
+            raise ProjectError(msg)
+        return msg + ' -> continuing without it (DRC does not need it)'
+    if rev is None:
+        n = 0
+        for p in names:
+            src, dst = os.path.join(repo, *p.split('/')), os.path.join(dest, *p.split('/'))
+            if os.path.isfile(src):          # a file deleted from the working tree but still in the index
+                os.makedirs(_long(os.path.dirname(dst)), exist_ok=True)
+                shutil.copyfile(_long(src), _long(dst))
+                n += 1
+        where = 'the working tree'
+    else:
+        used = [s for s in specs if any(n == s or n.startswith(s + '/') for n in names)]   # an unmatched one fails
+        n = extract_tar(git(repo, 'archive', '--format=tar', rev, '--', *used, binary=True), dest)
+        where = rev[:9]
+    return f'library: {n} files of {library_dir} (folder {lib} at {where}) ' \
+           f'({", ".join(paths) if paths else "whole tree"})'
 
 
 def sheet_closure(proj_dir, root_sch):
@@ -231,7 +300,7 @@ def build(dest, repo='.', rev=None, worktree=False, project_dir=None, library='a
     project_dir = norm_project_dir(detect_project_dir(repo, sha) if project_dir is None else project_dir)
     os.makedirs(dest, exist_ok=True)
     info = {'dest': dest, 'project_dir': project_dir}
-    lib_path = under(project_dir, library_dir) if library_dir else None
+    lib_path = library_path(project_dir, library_dir) if library_dir else None
     if worktree:
         names = git(repo, 'ls-files', '--', *_pathspec(project_dir)).splitlines()
         paths = project_paths(names, project_dir, full)
@@ -253,7 +322,10 @@ def build(dest, repo='.', rev=None, worktree=False, project_dir=None, library='a
         info['sha'] = sha
         lib_sha = gitlink(repo, sha, lib_path) if lib_path else None
     info['files'] = len(paths)
-    info['library'] = add_library(repo, project_dir, lib_sha, dest, library, library_dir, library_paths)
+    if lib_path and not lib_sha and library_kind(repo, sha, lib_path) == 'folder':
+        info['library'] = add_library_folder(repo, sha, project_dir, dest, library, library_dir, library_paths)
+    else:
+        info['library'] = add_library(repo, project_dir, lib_sha, dest, library, library_dir, library_paths)
     name, sheets = check_project(dest, project_dir, require_dru=require_dru)
     info['name'] = name
     info['sheets'] = sheets
@@ -313,8 +385,8 @@ def build_parser():
     g.add_argument('--worktree', action='store_true', help='copy the files from the working tree instead')
     ap.add_argument('--repo', default='.', metavar='DIR', help='the git repository (default: the current folder)')
     ap.add_argument('--library', choices=('auto', 'yes', 'no'), default='auto',
-                    help='add the library submodule: auto (if its checkout has the commit), yes (required) or no '
-                         '(default: auto)')
+                    help='add the library (--library-dir): auto (a submodule if its checkout has the commit, a folder '
+                         'if the commit has it), yes (required) or no (default: auto)')
     ap.add_argument('--full', action='store_true', help='copy every tracked file of the project folder, not only '
                                                         'what KiCad reads')
     config.add_args(ap, CONFIG_KEYS)
