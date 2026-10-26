@@ -6,12 +6,14 @@ kicad-fab-export --zip-only --out DIR
 ```
 
 Exports the fabrication and assembly package of commit `REV` into `DIR`, checks it, and packs the MacroFab upload
-zip. Every flag is in the [CLI reference](cli.md#kicad-fab-export).
+zip. With `--pcbway` it also writes PCBWay's BOM, centroid files and Gerber zip ([PCBWay](pcbway.md)). Every flag is
+in the [CLI reference](cli.md#kicad-fab-export).
 
 ## How a run goes
 
-1. **Project copy.** `git archive REV` of the project folder (and, with `library_dir`, of the library submodule at
-   the commit the board points it at) is unpacked into a temporary work folder. No design file is read from the
+1. **Project copy.** `git archive REV` of the project folder (and, with [`library_dir`](configuration.md#library_dir),
+   of the part library: a submodule at the commit the board points it at, or a folder of the repository such as
+   `../lib` from `REV` itself) is unpacked into a temporary work folder. No design file is read from the
    working tree (only the optional [config file](configuration.md#the-config-file) is), and nothing in the repository
    is written. `REV` can be any commit, including one on no branch (that is a warning, see
    [checks](#checks)).
@@ -19,9 +21,9 @@ zip. Every flag is in the [CLI reference](cli.md#kicad-fab-export).
    KiCad's Python (outline, footprints, pads, paste, courtyards, vias), and the schematic netlist and BOM from
    `kicad-cli`.
 3. **Steps.** Gerbers, drill, placement (XYRS and position file), paste, schematic PDF, assembly PDF, STEP, ODB++,
-   iBOM. A step whose inputs failed is skipped (`SKIP ... needs gerbers`), the others still run.
-4. **Checks** are collected throughout (see [Checks](#checks)); then the layer map, the upload zip and the manifest
-   are written, and a summary is printed.
+   iBOM, and with `--pcbway` the PCBWay BOM and centroid files. A step whose inputs failed is skipped (`SKIP ... needs gerbers`), the others still run.
+4. **Checks** are collected throughout (see [Checks](#checks)); then the layer map, the upload zip (and with
+   `--pcbway` the PCBWay Gerber zip) and the manifest are written, and a summary is printed.
 
 The outputs are written even when a check fails, so you can look at what is wrong. On success the work folder is
 deleted (unless `--work DIR` or `--keep-work`); on failure it is kept and the last summary line names it.
@@ -50,6 +52,9 @@ deleted (unless `--work DIR` or `--keep-work`); on failure it is kept and the la
 | `docs/NAME.step` | board and 3-D models | DNP parts left out (`--step-with-dnp` keeps them); origin = the XYRS corner, so the board spans 0..W x 0..H mm |
 | `docs/NAME_export_manifest.json` | the record of the run | see [The manifest](#the-manifest) |
 | `NAME_macrofab_upload.zip` | the upload | see [The upload zip](#the-upload-zip) |
+| `assembly/NAME_pcbway_bom.xlsx` | PCBWay BOM, in PCBWay's template layout | only with `--pcbway`; see [PCBWay](pcbway.md#the-bom) |
+| `assembly/NAME_pcbway_top.csv`, `assembly/NAME_pcbway_bottom.csv` | PCBWay centroid files, one per side | only with `--pcbway`; see [PCBWay](pcbway.md#the-centroid-files) |
+| `NAME_pcbway_gerbers.zip` | the fab Gerbers and drill files, for PCBWay | only with `--pcbway`; see [PCBWay](pcbway.md#the-gerber-zip) |
 | `bom/...` | written by [`kicad-macrofab-bom`](bom.md) | read here (the xlsx goes into the zip), never written |
 
 The layer map of the demo:
@@ -144,9 +149,12 @@ A board without filled vias passes the filled-via checks and gets an empty `NAME
   files without it). With PyMuPDF, every XYRS designator must be printed on its side's page; that check runs on
   the merged file or on the two files alike.
 - **STEP**: `--subst-models --min-distance 0.01mm --user-origin <XYRS corner>`, DNP parts left out. Models resolve as
-  in the repository checkout: `${KIPRJMOD}/<library_dir>/...` from the staged library and KiCad's own model library
-  (`KICAD10_3DMODEL_DIR`). A footprint that names a bare file gets a flat copy only when it has no other model, so no
-  part ends up with two coincident bodies. The origin is verified on a second, board-only STEP.
+  in the repository checkout: `${KIPRJMOD}/<library_dir>/...` from the staged library (a submodule, or a folder such
+  as `${KIPRJMOD}/../lib/3d_models/...`) and KiCad's own model library (`KICAD10_3DMODEL_DIR`). A footprint that names
+  a bare file gets a flat copy only when it has no other model, so no part ends up with two coincident bodies. The
+  origin is verified on a second, board-only STEP, whose extent is taken from its edges: their end points and the
+  extremes their arcs and circles pass through. A round outline is one STEP circle, written as its centre and one
+  seam point, so the end points alone would see half of the board.
 - **ODB++**: zip, mm, reference only.
 - **iBOM**: run with KiCad's Python from the unpacked InteractiveHtmlBom package given by `--ibom-pkg`, with tracks,
   nets, the `MPN` field and pin 1 highlighted on every part; without `--ibom-pkg` it is skipped with a warning.
@@ -222,17 +230,26 @@ board filled in).
 | `assembly PDF: every XYRS designator is printed on its side's page (N)` | error | a placed part has no `${REFERENCE}` text on its Fab layer ([example](troubleshooting.md#designators-missing-on-the-assembly-drawing)) |
 | `STEP: components in the file = parts with a resolved model (N)` | warn | the STEP has other components than expected |
 | `STEP: parts whose footprint lists the same model file twice (...)` | warn | two coincident bodies |
-| `STEP: <library_dir> 3-D models added to the project copy` | error | with `library_dir` set: the library's models could not be staged (no checkout has the commit) |
+| `STEP: <library_dir> 3-D models added to the project copy` | error | with `library_dir` set: the library's models could not be staged (no submodule checkout has the commit, or there is no such submodule or folder at `REV`, or nothing in `library_model_paths`) |
 | `STEP: every placed part with a model entry gets a model` | error | every model entry of a part points at a file that does not exist |
 | `STEP: N model entries do not resolve (each of these parts has another entry that does)` | warn | extra model entries that do not resolve |
 | `STEP: fitted parts with no 3-D model in their footprint` | warn | the footprint has no model at all |
-| `STEP: origin = XYRS corner (board spans 0..W x 0..H mm)` | error | the STEP origin is not the XYRS corner |
+| `STEP: origin = XYRS corner (board spans 0..W x 0..H mm)` | error | the board-only STEP's edges (end points, arc and circle extremes) do not span 0..W x 0..H: the STEP origin is not the XYRS corner |
 | `ODB++: components = placed footprints (N)` | warn | kicad-cli's ODB++ lists other components |
 | `ODB++: filling layer carries the filled vias` | warn | the ODB++ filling layer does not match the filled vias |
 | `iBOM: skipped (no --ibom-pkg)` | warn | no iBOM was asked for |
 | `iBOM: BOM parts = XYRS Populate 1 (...)` | error | the iBOM and the XYRS disagree on fitted parts or sides |
 | `iBOM: title block revision = R` | error | the iBOM page shows another revision |
 | `iBOM: pin 1 highlighted on every part (highlight_pin1 = all)` | warn | the InteractiveHtmlBom version ignored the option |
+
+### PCBWay (with `--pcbway`)
+
+| Check | Level | A FAIL / WARN means |
+|---|---|---|
+| `PCBWay BOM: N lines for the M XYRS rows, each designator once, Qty = its designators, DNS = Populate 0, MPN / Value / Footprint / Type as in the XYRS` | error | the BOM read back from the xlsx does not carry each XYRS designator exactly once, a line's `*Qty` is not its number of designators, or a line's Type, MPN, Value or Footprint is not the XYRS's for one of its designators (a non-ASCII character is compared as the XYRS writes it, `?`) |
+| `PCBWay centroid: the Populate 1 XYRS rows, a top / b bottom, at the XYRS point x 0.0254 mm (max diff d mm)` | error | a centroid file has other designators or another order than the side's Populate 1 XYRS rows, a point more than 0.0002 mm from the XYRS point, or the wrong Layer |
+| `PCBWay centroid vs KiCad pos: rotation = pos Rot and side = pos Side on all N shared parts (no +180 on the bottom)` | error | a centroid rotation or side is not KiCad's own, as its position file gives it |
+| `PCBWay Gerber zip: N members (G Gerbers, PTH + NPTH drills), CRC ok, byte-identical to the fab files, no assembly or reference files` | error | the zip is corrupt, differs from the files in `fab/`, or holds a file that is not a fab Gerber or drill file |
 
 ### Counts, commit and zip
 
@@ -269,6 +286,7 @@ diffed. Its keys, with values from the demo's v1.1 package (trimmed):
 | `paste` | the paste findings | `{"populate0_checked": 1, "board_sources": {}, ...}` |
 | `xyrs_pad1`, `xyrs_body_offsets` | placement-review data, see [XYRS](xyrs.md#placement-review-data) | |
 | `models` | STEP model resolution | `{"entries": 54, "missing_entries": 0, "fitted_parts_without_model": ["P3", "RV1"], ...}` |
+| `pcbway` | only with `--pcbway`: the BOM's path and line counts, each centroid file's path and rows, the Gerber zip's path, members, bytes and sha256 | `{"bom": "assembly/pic_programmer_v1.0_pcbway_bom.xlsx", "bom_lines": 37, "dns_lines": 1, ...}` |
 | `counts`, `notes`, `steps`, `checks` | what the summary prints | `{"name": ..., "level": "error", "ok": true, "detail": ""}` per check |
 | `commands` | every external command, in order | `"kicad-cli pcb export gerbers --board-plot-params -o <work>/gerber_bpp/ <work>/proj/hw/pic_programmer.kicad_pcb"` |
 | `upload_zip` | path, members, bytes, sha256 of the zip | |
@@ -349,8 +367,9 @@ Some behaviours look like shortcuts but are on purpose:
 
 ## Reproducibility
 
-Re-running a commit reproduces the XYRS, the position file, the layer map, the BOM xlsx and csvs and the reports byte
-for byte. Gerbers, drill files, the Gerber job, the drill report and the PDFs differ only in the timestamps KiCad
-writes into them (and so does the upload zip's content). KiCad's STEP and ODB++ writers also renumber entities and
+Re-running a commit reproduces the XYRS, the position file, the layer map, the BOM xlsx and csvs, the PCBWay BOM
+and centroid files and the reports byte for byte. Gerbers, drill files, the Gerber job, the drill report and the PDFs
+differ only in the timestamps KiCad writes into them (and so does the content of the upload zip and the PCBWay Gerber
+zip). KiCad's STEP and ODB++ writers also renumber entities and
 reorder features between runs, so compare those structurally. The xlsx is reproducible for a given openpyxl version,
 with or without lxml installed (see [the xlsx](bom.md#the-xlsx) for `OPENPYXL_LXML`).

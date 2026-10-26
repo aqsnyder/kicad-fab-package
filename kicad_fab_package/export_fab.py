@@ -13,11 +13,12 @@ usage: kicad-fab-export REV --out DIR [--repo DIR] [--project-dir DIR] [--name N
                                                    refreshes the manifest's file hashes)
 
 REV is any commit (a commit object on no branch works). The board, schematic and project come from a git-archive
-project copy (as kicad-project-copy makes) in a temp folder. With a library submodule configured (--library-dir,
-relative to the project folder), its files are added to the copy, and its 3-D models (--library-model-paths) at the
-board's library gitlink are staged next to it (the main checkout's library is used when a linked worktree's
-submodule is empty). Nothing in the repo is written. NAME defaults to the name template, '{project}_v{revision}'
-({project} = the KiCad project name, {revision} = the board's REVISION property).
+project copy (as kicad-project-copy makes) in a temp folder. With a library configured (--library-dir, relative to
+the project folder), its files are added to the copy and its 3-D models (--library-model-paths) are staged next to
+it: a submodule at the board's library gitlink (the main checkout's library is used when a linked worktree's
+submodule is empty), or a plain folder of the repository, such as ../lib, from REV itself. Nothing in the repo is
+written. NAME defaults to the name template, '{project}_v{revision}' ({project} = the KiCad project name, {revision} =
+the board's REVISION property).
 
 What lands in DIR (bom/ belongs to the BOM tool, kicad-macrofab-bom, and is only read here):
 
@@ -59,7 +60,9 @@ What lands in DIR (bom/ belongs to the BOM tool, kicad-macrofab-bom, and is only
                                    pin 1 highlighted on every part.
   docs/      NAME_schematic.pdf    the whole hierarchy, built-in default colour theme.
              NAME.step             board + 3-D models (--subst-models), DNP parts left out (--step-with-dnp keeps
-                                   them), origin = the XYRS corner, so the board spans 0..W x 0..H mm. Models resolve
+                                   them), origin = the XYRS corner, so the board spans 0..W x 0..H mm (checked on a
+                                   board-only STEP: the edges' end points and the extremes their arcs and circles
+                                   pass through, so a round outline counts in full). Models resolve
                                    as in the repo checkout: ${KIPRJMOD}/<library-dir>/... and KiCad's own; a bare
                                    file name only for a part with no other model (no doubled bodies).
              NAME_export_manifest.json   revision, commands, counts, checks, layer map, sha256 of every output
@@ -71,6 +74,21 @@ What lands in DIR (bom/ belongs to the BOM tool, kicad-macrofab-bom, and is only
                                    U_PTH.XLN / U_PTH_FILLED.XLN / U_NPTH.XLN, U.XYRS, and bom/NAME_macrofab.xlsx as
                                    U_macrofab.xlsx if it exists (its designators must equal the XYRS's). No PDF, ODB++
                                    or gbrjob. The names inside fab/, assembly/ and bom/ keep NAME.
+With --pcbway (config key pcbway), also the PCBWay files, all derived from the XYRS rows (the MacroFab files are the
+same with or without it):
+  assembly/  NAME_pcbway_bom.xlsx  PCBWay's BOM template columns: Item #, *Designator, *Qty, Manufacturer, *Mfg Part #,
+                                   Description / Value, *Package/Footprint, Type, Your Instructions / Notes. One line
+                                   per MPN + Manufacturer + Value + Footprint + Type, designators comma-joined in
+                                   natural order. Type: SMD or thru-hole from the footprint attribute (the XYRS Type
+                                   1/2, never a schematic Type field), DNS for Populate 0, so a DNS part never shares a
+                                   line with fitted ones; the DNS lines come last.
+             NAME_pcbway_top.csv   centroid files, one per side: Designator, Mid X(mm), Mid Y(mm), Layer, Rotation.
+             NAME_pcbway_bottom.csv  Populate 1 rows only; the XYRS point in mm (mil x 0.0254: origin = the
+                                   outline's bottom-left corner seen from the top, Y up, bottom X not mirrored);
+                                   rotation = the raw KiCad orientation on both sides (no +180 on the bottom). A side
+                                   without fitted parts gets a header-only file.
+  NAME_pcbway_gerbers.zip          the fab/ Gerbers, NAME_PTH.drl and NAME_NPTH.drl (and NAME_PTH_FILLED.drl when it has
+                                   holes), flat, under their fab/ names; no assembly or reference files.
 
 Checks (an error makes the exit code 1; a warning is only printed): X2 off; Gerbers identical to an explicit
 pinned-flag plot; outline Gerber extents = the pcbnew centre-line box; every drill hit inside the outline and on a
@@ -84,9 +102,11 @@ the part's pad box on its own side); every fitted SMT row has paste in its pad b
 --accept-dnp-paste REFS turns the paste error for those parts into a warning and a note (the fallback when the board
 cannot change: tell MacroFab "no paste at REFS"); schematic page count; every XYRS designator printed on its assembly
 page (PyMuPDF); STEP origin; 3-D models resolved; ODB++ components and filling layer; iBOM line count and refs; xlsx vs
-XYRS; the upload member names; --expect counts (fitted, rows, pop0, fitted_top, fitted_bottom, pth, filled, npth,
-pages). A warning, not an error: REV is on no branch or tag (a scratch commit; re-run on the final commit before the
-outputs are committed, because REV is written into the XYRS header, the manifest and the zip dates).
+XYRS; the upload member names; with --pcbway, the PCBWay BOM lines, the centroid rows against the XYRS and their
+rotation against the KiCad pos file, and the PCBWay Gerber zip members; --expect counts (fitted, rows, pop0,
+fitted_top, fitted_bottom, pth, filled, npth, pages). A warning, not an error: REV is on no branch or tag (a scratch
+commit; re-run on the final commit before the outputs are committed, because REV is written into the XYRS header, the
+manifest and the zip dates).
 Silk strokes thinner than 0.127 mm (MacroFab's 5 mil minimum) are counted per width (counts, not a check).
 Exit 0 ok, 1 a step or check failed (the summary says which), 2 setup error. The temp folder is removed on success
 unless --work or --keep-work is given.
@@ -94,6 +114,7 @@ unless --work or --keep-work is given.
 import argparse
 import collections
 import csv
+import datetime
 import hashlib
 import json
 import math
@@ -109,9 +130,9 @@ import xml.etree.ElementTree as ET
 
 # KiCad's python runs this file as a plain script (-I) for --pcbnew-dump, which needs the standard library only
 try:
-    from . import config, kproject, models3d
+    from . import config, kproject, make_macrofab_xlsx, models3d
 except ImportError:
-    config = kproject = models3d = None
+    config = kproject = make_macrofab_xlsx = models3d = None
 
 TOOL = 'export_fab.py'
 MIL = 0.0254
@@ -126,6 +147,10 @@ NON_COPPER = {  # gbrjob FileFunction -> (KiCad layer, MacroFab extension)
     'Profile': ('Edge.Cuts', 'BOR'),
 }
 EXPECT_KEYS = ('fitted', 'rows', 'pop0', 'fitted_top', 'fitted_bottom', 'pth', 'filled', 'npth', 'pages')
+# PCBWay's BOM template (Sample_BOM_PCBWay.xlsx) headers, in order; '*' marks the ones PCBWay requires
+PCBWAY_BOM_COLUMNS = ['Item #', '*Designator', '*Qty', 'Manufacturer', '*Mfg Part #', 'Description / Value',
+                      '*Package/Footprint', 'Type', 'Your Instructions / Notes']
+PCBWAY_CENTROID_COLUMNS = ['Designator', 'Mid X(mm)', 'Mid Y(mm)', 'Layer', 'Rotation']
 DATE_LINE_RE = re.compile(r'CreationDate|Created by|^; DRILL file|date \d{4}-\d\d-\d\d')
 
 
@@ -371,6 +396,57 @@ def upload_members(out, prefix, layer_map, base=None):
     if os.path.exists(xlsx):
         members.append((xlsx, '%s_macrofab.xlsx' % base))
     return members
+
+
+def pcbway_type(row):
+    """The PCBWay BOM Type of an XYRS row: DNS for Populate 0, else thru-hole for XYRS Type 2 (KiCad's through-hole
+    footprint attribute) and SMD for the rest. Never a Type field of the schematic."""
+    return 'DNS' if not row['pop'] else ('thru-hole' if row['type'] == 2 else 'SMD')
+
+
+def pcbway_bom_lines(rows, manufacturers):
+    """The PCBWay BOM lines (dicts keyed by PCBWAY_BOM_COLUMNS) of the XYRS rows: one line per MPN + Manufacturer +
+    Value + Footprint + Type, its designators joined with ', ' in natural order. The fitted lines come first, then the
+    DNS lines, each in the natural order of their first designator. manufacturers: {ref: Manufacturer field}."""
+    groups = collections.OrderedDict()
+    for r in sorted(rows, key=lambda r: natural_key(r['ref'])):
+        key = (r['mpn'], manufacturers.get(r['ref'], ''), r['value'], r['footprint'], pcbway_type(r))
+        groups.setdefault(key, []).append(r['ref'])
+    lines = []
+    for i, (key, refs) in enumerate(sorted(groups.items(), key=lambda g: (g[0][4] == 'DNS', natural_key(g[1][0]))), 1):
+        mpn, mfr, value, footprint, kind = key
+        lines.append(collections.OrderedDict(zip(PCBWAY_BOM_COLUMNS, [i, ', '.join(refs), len(refs), mfr, mpn, value,
+                                                                      footprint, kind, ''])))
+    return lines
+
+
+def pcbway_mm(mil):
+    """A centroid coordinate: XYRS mil -> mm, 4 decimals, never '-0.0000'."""
+    s = '%.4f' % (mil * MIL)
+    return '0.0000' if s == '-0.0000' else s
+
+
+def pcbway_rotation(orientation):
+    """A centroid rotation: the KiCad orientation as it is (no +180 on the bottom), 0 <= r < 360, at most 3 decimals
+    ('90', '45.5')."""
+    r = round(orientation % 360, 3) % 360
+    return ('%.3f' % r).rstrip('0').rstrip('.')
+
+
+def pcbway_centroid(rows, side):
+    """The centroid rows [Designator, Mid X(mm), Mid Y(mm), Layer, Rotation] of the Populate 1 XYRS rows on side (1
+    top, 2 bottom): the XYRS point times 0.0254, so the origin (the outline's bottom-left corner seen from the top),
+    the Y-up axis and the unmirrored bottom X are the XYRS's; the rotation is KiCad's orientation on both sides."""
+    return [[r['ref'], pcbway_mm(r['x']), pcbway_mm(r['y']), 'Top' if side == 1 else 'Bottom',
+             pcbway_rotation(r['kicad_rot'])] for r in rows if r['pop'] and r['side'] == side]
+
+
+def pcbway_zip_members(out, prefix, layer_map, filled_holes):
+    """[(source path, member name)] of the PCBWay Gerber zip: the fab Gerbers, NAME_PTH.drl, NAME_PTH_FILLED.drl when
+    filled_holes, and NAME_NPTH.drl, flat, under their fab/ names."""
+    names = [s['fab_file'] for s in layer_map]
+    names += ['%s_%s.drl' % (prefix, k) for k in (('PTH', 'PTH_FILLED', 'NPTH') if filled_holes else ('PTH', 'NPTH'))]
+    return [(os.path.join(out, 'fab', n), n) for n in names]
 
 
 def sha256(path):
@@ -659,6 +735,117 @@ def board_vias_text(text):
     return vias
 
 
+# --------------------------------------------------------------------------------------------- STEP
+STEP_ENTITY_RE = re.compile(r'#(\d+)\s*=\s*([A-Z_][A-Z0-9_]*)\s*\((.*?)\)\s*;', re.S)   # simple entities only
+STEP_COMPLEX_RE = re.compile(r'#(\d+)\s*=\s*\((.*?)\)\s*;', re.S)                      # ( A(..) B(..) ) entities
+
+
+def step_args(text):
+    """The top-level parameters of a STEP entity: "'',(1.,2.),#5" -> ["''", '(1.,2.)', '#5']."""
+    out, cur, depth, quoted = [], [], 0, False
+    for ch in text:
+        if quoted:
+            quoted = ch != "'"
+        elif ch == "'":
+            quoted = True
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            out.append(''.join(cur).strip())
+            cur = []
+            continue
+        cur.append(ch)
+    out.append(''.join(cur).strip())
+    return out
+
+
+def step_edge_points(text):
+    """The points that bound the edges of a STEP file's shapes, as (x, y, z): every edge's end points, the extremes in
+    x, y and z that a circle or circular-arc edge passes through, and the control points of any other curve (a
+    B-spline lies inside them). A CIRCLE carries only its centre and a seam vertex as CARTESIAN_POINTs, so a round
+    board outline exported as one circle would otherwise look like half the board. Every CARTESIAN_POINT when the
+    file has no EDGE_CURVE."""
+    ents = {int(m.group(1)): (m.group(2), m.group(3)) for m in STEP_ENTITY_RE.finditer(text)}
+    raw = {int(m.group(1)): m.group(2) for m in STEP_COMPLEX_RE.finditer(text)}
+
+    def ref(tok):
+        return int(tok.strip().lstrip('#')) if tok.strip().startswith('#') else None
+
+    def coords(i):
+        typ, args = ents.get(i, ('', ''))
+        if typ not in ('CARTESIAN_POINT', 'DIRECTION'):
+            return None
+        return tuple(float(v) for v in step_args(args)[1].strip('()').split(','))
+
+    def vertex(tok):
+        typ, args = ents.get(ref(tok), ('', ''))
+        return coords(ref(step_args(args)[1])) if typ == 'VERTEX_POINT' else None
+
+    def unit(v):
+        n = math.sqrt(sum(c * c for c in v))
+        return tuple(c / n for c in v) if n > 1e-12 else None
+
+    def arc_extremes(circle, start, end, full):
+        """Points of a circle where x, y or z is extreme, within the counter-clockwise sweep start -> end (about the
+        circle's axis)."""
+        a = step_args(circle)
+        _, place = ents.get(ref(a[1]), ('', ''))
+        p = step_args(place)
+        c, n = coords(ref(p[1])), unit(coords(ref(p[2])) or (0.0, 0.0, 1.0))
+        u = coords(ref(p[3])) if len(p) > 3 else None
+        r = float(a[2])
+        if c is None or n is None or len(c) != 3 or len(n) != 3:
+            return []
+        u = unit(tuple(ui - sum(x * y for x, y in zip(u, n)) * ni for ui, ni in zip(u, n))) if u else None
+        if u is None:   # no usable reference direction: any direction across the axis
+            u = unit((n[1], -n[0], 0.0) if abs(n[2]) < 0.9 else (0.0, n[2], -n[1]))
+        v = (n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0])
+
+        def angle(q):
+            d = [qi - ci for qi, ci in zip(q, c)]
+            return math.atan2(sum(x * y for x, y in zip(d, v)), sum(x * y for x, y in zip(d, u)))
+        t0 = 0.0 if full else angle(start)
+        sweep = 2 * math.pi if full else (angle(end) - t0) % (2 * math.pi) or 2 * math.pi
+        out = []
+        for k in range(3):
+            if math.hypot(u[k], v[k]) < 1e-12:
+                continue
+            for t in (math.atan2(v[k], u[k]), math.atan2(v[k], u[k]) + math.pi):
+                if (t - t0) % (2 * math.pi) <= sweep + 1e-9:
+                    out.append(tuple(ci + r * (math.cos(t) * ui + math.sin(t) * vi) for ci, ui, vi in zip(c, u, v)))
+        return out
+
+    pts = []
+    for typ, args in ents.values():
+        if typ != 'EDGE_CURVE':
+            continue
+        a = step_args(args)
+        start, end = vertex(a[1]), vertex(a[2])
+        pts += [q for q in (start, end) if q]
+        curve = ref(a[3])
+        ctyp, cargs = ents.get(curve, ('', ''))
+        if ctyp in ('SURFACE_CURVE', 'SEAM_CURVE'):      # the 3-D curve comes first, then its 2-D p-curves
+            curve = ref(step_args(cargs)[1])
+            ctyp, cargs = ents.get(curve, ('', ''))
+        if ctyp == 'LINE':
+            continue
+        if ctyp == 'CIRCLE' and start and end:
+            forward = a[4].strip() != '.F.'      # the edge runs along the circle's own direction
+            full = a[1].strip() == a[2].strip() or max(abs(x - y) for x, y in zip(start, end)) < 1e-9
+            pts += arc_extremes(cargs, start if forward else end, end if forward else start, full)
+        else:                                    # a B-spline or another curve: its control points bound it
+            body = cargs if ctyp else raw.get(curve, '')
+            pts += [coords(int(i)) for i in re.findall(r'#(\d+)', body)
+                    if ents.get(int(i), ('',))[0] == 'CARTESIAN_POINT']
+    pts = [q for q in pts if q and len(q) == 3]          # p-curves live in a surface's 2-D parameter space
+    if not pts:
+        pts = [tuple(float(v) for v in m.group(1).split(','))
+               for m in re.finditer(r"CARTESIAN_POINT\('[^']*',\(([^)]*)\)\)", text)]
+    return pts
+
+
 # --------------------------------------------------------------------------------------------- the run
 class Ctx:
     def __init__(self, a):
@@ -733,8 +920,8 @@ def step_project(C):
                           library_dir=libdir, library_paths=s.library_paths, require_dru=s.require_dru)
     C.project_dir = info['project_dir']
     lib = info['library']
-    if libdir and 'not available' in lib:
-        lib_sha = kproject.gitlink(C.repo, C.sha, kproject.under(C.project_dir, libdir))
+    if libdir and 'not available' in lib:     # a submodule whose checkout lacks the commit
+        lib_sha = kproject.gitlink(C.repo, C.sha, kproject.library_path(C.project_dir, libdir))
         common = kproject.git(C.repo, 'rev-parse', '--path-format=absolute', '--git-common-dir')
         main_co = os.path.dirname(os.path.abspath(common))
         if not kproject.same_dir(main_co, C.top):
@@ -753,12 +940,13 @@ def step_project(C):
         # file). Here it fills a staging folder; only the <library-dir> tree goes into the project, and a flat copy
         # is added in step_step only for a part that would otherwise have no model. Otherwise a footprint listing
         # both 'X.stp' and '${KIPRJMOD}/<library-dir>/<models>/X.stp' gets two coincident bodies, which the repo
-        # checkout (no flat files in the project folder) never shows.
-        C.models_staging = os.path.join(C.work, 'models_staging')
+        # checkout (no flat files in the project folder) never shows. The staging project folder is nested like the
+        # real one, so a library beside it ('../lib') is staged inside the staging folder too.
+        C.models_staging = os.path.join(C.work, 'models_staging', *[p for p in C.project_dir.split('/') if p])
         st = models3d.library_models(C.top, C.sha, False, C.models_staging, C.project_dir, libdir,
                                      s.library_model_paths)
-        shutil.copytree(os.path.join(C.models_staging, *libdir.split('/')), os.path.join(C.proj, *libdir.split('/')),
-                        dirs_exist_ok=True)
+        shutil.copytree(os.path.normpath(os.path.join(C.models_staging, *libdir.split('/'))),
+                        os.path.normpath(os.path.join(C.proj, *libdir.split('/'))), dirs_exist_ok=True)
         C.models_status = st + ' (library tree only)'
         C.models_ok = True
     except models3d.ModelLibraryError as e:
@@ -1230,6 +1418,7 @@ def step_placement(C):
                    'XYRS.' % C.s.pos_note_keeps)
     with open(pos, encoding='utf-8-sig', newline='') as f:
         prow = list(csv.DictReader(f))
+    C.pos_rows = prow
     want = collections.Counter(fp['ref'] for fp in C.pcb['footprints'] if not fp['exclude_pos'] and not fp['dnp'])
     got = collections.Counter(r['Ref'] for r in prow)
     C.check('pos: rows = footprints not excluded from pos files and not DNP (%d)' % sum(want.values()), got == want,
@@ -1377,6 +1566,126 @@ def step_paste(C):
         C.counts['paste_F'], C.counts['paste_B'], plural(len(pop0), 'Populate 0 part'),
         'no paste' if not source and not plotted else 'PASTE on ' + ', '.join(
             sorted(set(source) | set(plotted), key=natural_key)))
+
+
+def read_xyrs(path):
+    """{designator: the 12 XYRS fields} of an XYRS file, in file order."""
+    with open(path, encoding='ascii') as f:
+        rows = [l.rstrip('\n').split('\t') for l in f if not l.startswith('#')]
+    return collections.OrderedDict((r[0], r) for r in rows)
+
+
+def step_pcbway(C):
+    """With --pcbway: the PCBWay BOM xlsx and the top and bottom centroid csvs, all from the XYRS rows."""
+    if make_macrofab_xlsx.openpyxl is None:
+        raise StepError('the PCBWay BOM xlsx needs openpyxl (pip install openpyxl)')
+    rows = C.xyrs_rows
+    mfr = {}
+    for r in rows:
+        f = C.comps[r['ref']]['fields']
+        mfr[r['ref']] = (f.get('Manufacturer') or f.get('MANUFACTURER') or '').strip()
+    lines = pcbway_bom_lines(rows, mfr)
+    asm = os.path.join(C.out, 'assembly')
+    bom = C.put(os.path.join(asm, '%s_pcbway_bom.xlsx' % C.prefix))
+    when = kproject.iso_datetime(C.commit_date).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    make_macrofab_xlsx.write_xlsx(bom, lines, when, '%s PCBWay BOM' % C.prefix, '%s from %s' % (C.generator, C.sha),
+                                  columns=PCBWAY_BOM_COLUMNS, creator=TOOL, max_width=60)
+    check_pcbway_bom(C, bom)
+    files = collections.OrderedDict()
+    for side, label in ((1, 'top'), (2, 'bottom')):
+        path = C.put(os.path.join(asm, '%s_pcbway_%s.csv' % (C.prefix, label)))
+        data = pcbway_centroid(rows, side)
+        # a non-ASCII designator is already an XYRS error; write it as '?' so the rest of the package is still produced
+        with open(path, 'w', encoding='ascii', errors='replace', newline='') as f:
+            w = csv.writer(f, lineterminator='\n')
+            w.writerow(PCBWAY_CENTROID_COLUMNS)
+            w.writerows(data)
+        files[label] = path
+    check_pcbway_centroid(C, files)
+    n_dns = sum(1 for l in lines if l['Type'] == 'DNS')
+    rel = lambda p: os.path.relpath(p, C.out).replace(os.sep, '/')   # noqa: E731
+    C.pcbway = collections.OrderedDict([
+        ('bom', rel(bom)), ('bom_lines', len(lines)), ('dns_lines', n_dns),
+        ('centroid', collections.OrderedDict((k, {'path': rel(p), 'rows': C.counts['fitted_' + k]})
+                                             for k, p in files.items()))])
+    C.counts['pcbway_bom_lines'] = len(lines)
+    return 'BOM %s (%d DNS) for %s; centroid %d top / %d bottom' % (
+        plural(len(lines), 'line'), n_dns, plural(len(rows), 'XYRS row'), C.counts['fitted_top'],
+        C.counts['fitted_bottom'])
+
+
+def check_pcbway_bom(C, path):
+    """Read the PCBWay BOM back and hold it against the XYRS file: every designator on one line, Qty = the designators
+    on the line, Type DNS exactly for Populate 0, and each line's MPN, Value, Footprint and SMD / thru-hole the
+    XYRS's for every designator on it."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        got = list(wb.worksheets[0].iter_rows(values_only=True))
+    finally:
+        wb.close()   # a read-only workbook keeps the file open until closed
+    xyrs = read_xyrs(C.xyrs_path)
+    hdr = [str(h or '').strip() for h in got[0]]
+    seen, bad = collections.Counter(), []
+    for line in got[1:]:
+        d = dict(zip(hdr, ['' if v is None else v for v in line]))
+        refs = [x.strip() for x in str(d.get('*Designator', '')).split(',') if x.strip()]
+        seen.update(refs)
+        if d.get('*Qty') != len(refs):
+            bad.append('%s: Qty %s for %d designators' % (refs[0] if refs else '?', d.get('*Qty'), len(refs)))
+        for ref in refs:
+            x = xyrs.get(ref)
+            if x is None:
+                continue
+            want = ('DNS' if x[10] == '0' else ('thru-hole' if x[5] == '2' else 'SMD'), x[11], x[8], x[9])
+            # the XYRS writes a non-ASCII character as '?' (already an XYRS error): compare in that form
+            have = tuple(str(d.get(k, '')).encode('ascii', 'replace').decode('ascii') for k in
+                         ('Type', '*Mfg Part #', 'Description / Value', '*Package/Footprint'))
+            if have != want:
+                bad.append('%s: line has Type/MPN/Value/Footprint %s, XYRS %s' % (ref, '/'.join(have), '/'.join(want)))
+    twice = sorted((r for r, n in seen.items() if n > 1), key=natural_key)
+    C.check('PCBWay BOM: %s for the %s, each designator once, Qty = its designators, DNS = Populate 0, MPN / Value / '
+            'Footprint / Type as in the XYRS' % (plural(len(got) - 1, 'line'), plural(len(xyrs), 'XYRS row')),
+            hdr == PCBWAY_BOM_COLUMNS and set(seen) == set(xyrs) and not twice and not bad,
+            'header %s; only BOM %s; only XYRS %s; twice %s; %s' % (
+                hdr if hdr != PCBWAY_BOM_COLUMNS else 'ok', sorted(set(seen) - set(xyrs), key=natural_key)[:10],
+                sorted(set(xyrs) - set(seen), key=natural_key)[:10], twice[:10], '; '.join(bad[:10]) or 'lines ok'))
+
+
+def check_pcbway_centroid(C, files):
+    """Read the centroid csvs back: each holds the Populate 1 XYRS rows of its side, in XYRS order, at the XYRS point
+    (mil) times 0.0254; and each rotation is KiCad's own (the pos file's Rot, the bottom without the XYRS's +180)."""
+    xyrs = read_xyrs(C.xyrs_path)
+    got, dev, bad = {}, 0.0, []
+    for side, label in (('1', 'top'), ('2', 'bottom')):
+        with open(files[label], encoding='ascii', newline='') as f:
+            rows = list(csv.reader(f))
+        if rows[:1] != [PCBWAY_CENTROID_COLUMNS]:
+            bad.append('%s header %s' % (label, rows[:1]))
+        want = [k for k, x in xyrs.items() if x[4] == side and x[10] == '1']
+        if [r[0] for r in rows[1:]] != want:
+            bad.append('%s designators %s, XYRS %s' % (label, [r[0] for r in rows[1:]][:8], want[:8]))
+        for r in rows[1:]:
+            x = xyrs.get(r[0])
+            if x is None or len(r) != 5:
+                continue
+            dev = max(dev, abs(float(r[1]) - float(x[1]) * MIL), abs(float(r[2]) - float(x[2]) * MIL))
+            if r[3] != label.capitalize():
+                bad.append('%s Layer %s on the %s side' % (r[0], r[3], label))
+            got[r[0]] = (r[4], label)
+    C.check('PCBWay centroid: the Populate 1 XYRS rows, %d top / %d bottom, at the XYRS point x 0.0254 mm (max diff '
+            '%.4f mm)' % (C.counts['fitted_top'], C.counts['fitted_bottom'], dev), not bad and dev < 0.0002,
+            '; '.join(bad[:10]))
+    rot_bad = []
+    shared = [p for p in getattr(C, 'pos_rows', []) if p['Ref'] in got]
+    for p in shared:
+        rot, label = got[p['Ref']]
+        d = abs(float(rot) - float(p['Rot']) % 360)
+        if min(d, 360 - d) > 0.001 or p['Side'] != label:
+            rot_bad.append('%s pos %s %s -> centroid %s %s' % (p['Ref'], p['Rot'], p['Side'], rot, label))
+    C.check('PCBWay centroid vs KiCad pos: rotation = pos Rot and side = pos Side on %s %s (no +180 on the bottom)'
+            % ('the' if len(shared) == 1 else 'all', plural(len(shared), 'shared part')), not rot_bad,
+            '; '.join(rot_bad[:10]))
 
 
 def step_sch_pdf(C):
@@ -1551,8 +1860,7 @@ def step_step(C):
     # origin check on a board-only export
     bo = os.path.join(C.work, 'board_only.step')
     C.kcli('pcb', 'export', 'step', '--force', '--board-only', '--user-origin', origin, '-o', bo, C.board)
-    pts = [tuple(float(v) for v in m.group(1).split(','))
-           for m in re.finditer(r"CARTESIAN_POINT\('[^']*',\(([^)]*)\)\)", read_text(bo))]
+    pts = step_edge_points(read_text(bo))
     bx0, bx1 = min(p[0] for p in pts), max(p[0] for p in pts)
     by0, by1 = min(p[1] for p in pts), max(p[1] for p in pts)
     w_mm, h_mm = C.size_mil[0] * MIL, C.size_mil[1] * MIL
@@ -1675,10 +1983,21 @@ def build_zip(C, manifest):
     else:
         C.check('upload zip: no %s yet (run kicad-macrofab-bom, then kicad-fab-export --zip-only)'
                 % os.path.relpath(xlsx, C.out).replace(os.sep, '/'), False, level='warn')
+    names, bad, differ = write_zip(out, members, manifest['commit_date'])
+    C.check('upload zip: %d members, CRC ok, byte-identical to the package files, no PDF / ODB++ / gbrjob' % len(names),
+            bad is None and not differ and not [n for n in names if re.search(r'\.(pdf|zip|gbrjob|tgz)$', n, re.I)],
+            ', '.join(names) + ('; differ: %s' % differ if differ else ''))
+    C.outputs.append(out)
+    return out, names
+
+
+def write_zip(out, members, commit_date):
+    """Write the zip out of [(source path, member name)], every member dated commit_date (git's ISO date), and read it
+    back: (member names, the first bad member or None, members whose bytes differ from their source)."""
     missing = [src for src, _ in members if not os.path.exists(src)]
     if missing:
         raise StepError('zip members missing: %s' % missing)
-    stamp = kproject.iso_datetime(manifest['commit_date']).timetuple()[:6]
+    stamp = kproject.iso_datetime(commit_date).timetuple()[:6]
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
         for src, arc in members:
             zi = zipfile.ZipInfo(arc, date_time=stamp)
@@ -1690,9 +2009,27 @@ def build_zip(C, manifest):
         names = z.namelist()
         bad = z.testzip()
         differ = [arc for src, arc in members if hashlib.sha256(z.read(arc)).hexdigest() != sha256(src)]
-    C.check('upload zip: %d members, CRC ok, byte-identical to the package files, no PDF / ODB++ / gbrjob' % len(names),
-            bad is None and not differ and not [n for n in names if re.search(r'\.(pdf|zip|gbrjob|tgz)$', n, re.I)],
-            ', '.join(names) + ('; differ: %s' % differ if differ else ''))
+    return names, bad, differ
+
+
+def build_pcbway_zip(C, manifest, filled_holes):
+    """With --pcbway: NAME_pcbway_gerbers.zip, the fab Gerbers and drill files (manifest['layer_map']; the filled-via
+    file only when it has holes), flat under their fab/ names."""
+    prefix = manifest['name']
+    out = os.path.join(C.out, '%s_pcbway_gerbers.zip' % prefix)
+    members = pcbway_zip_members(C.out, prefix, manifest['layer_map'], filled_holes)
+    names, bad, differ = write_zip(out, members, manifest['commit_date'])
+    other = [n for n in names if not re.search(r'\.(gbr|drl)$', n) or '/' in n]
+    C.check('PCBWay Gerber zip: %d members (%s, %s), CRC ok, byte-identical to the fab files, no assembly or '
+            'reference files' % (len(names), plural(len(manifest['layer_map']), 'Gerber'),
+                                 'PTH + PTH_FILLED + NPTH drills' if filled_holes else 'PTH + NPTH drills'),
+            bad is None and not differ and not other and names == [arc for _, arc in members],
+            ', '.join(names) + ('; differ: %s' % differ if differ else '') + ('; not fab files: %s' % other if other
+                                                                                else ''))
+    if filled_holes:
+        C.notes.append('PCBWay Gerber zip: %s_PTH_FILLED.drl holds the %s (IPC-4761 Type VII); say on the PCBWay '
+                       'order that the holes in that file are filled and capped'
+                       % (prefix, plural(filled_holes, 'filled-and-capped via')))
     C.outputs.append(out)
     return out, names
 
@@ -1763,7 +2100,8 @@ def refs_containing(repo, sha):
 
 CONFIG_KEYS = ('project_dir', 'name_template', 'library_dir', 'library_paths', 'library_model_paths',
                'generator_prefix', 'require_dru', 'kicad_cli', 'kicad_python', 'kicad_3dmodel_dir', 'ibom_pkg',
-               'non_part_refs', 'non_part_libs', 'xyrs_non_part_refs', 'xyrs_non_part_libs', 'require_filled_vias')
+               'non_part_refs', 'non_part_libs', 'xyrs_non_part_refs', 'xyrs_non_part_libs', 'require_filled_vias',
+               'pcbway')
 
 
 def build_parser():
@@ -1774,7 +2112,8 @@ def build_parser():
     ap.add_argument('--out', required=True, metavar='DIR', help='the package folder (created if needed); fab/, '
                                                                 'assembly/ and docs/ must be empty unless --force')
     ap.add_argument('--repo', default='.', metavar='DIR', help='the git repository (default: the current folder)')
-    ap.add_argument('--no-zip', action='store_true', help='do not write the upload zip')
+    ap.add_argument('--no-zip', action='store_true', help='do not write the upload zip (nor, with --pcbway, the '
+                                                          'PCBWay Gerber zip)')
     ap.add_argument('--zip-only', action='store_true', help='only re-pack the upload zip from the files already in '
                                                             '--out and refresh the manifest (no REV, no KiCad)')
     ap.add_argument('--name', help='output name prefix (default: the name template)')
@@ -1907,6 +2246,8 @@ def main(argv=None):
             ('STEP', step_step, ['board facts', 'pcbnew facts', 'schematic facts']),
             ('ODB++', step_odb, ['board facts', 'pcbnew facts']),
             ('iBOM', step_ibom, ['board facts', 'placement (XYRS, pos)'])]
+    if cfg.pcbway:
+        plan.append(('PCBWay BOM + centroid', step_pcbway, ['placement (XYRS, pos)']))
     status = {}
     for name, fn, deps in plan:
         bad = [d for d in deps if status.get(d) != 'ok']
@@ -1921,7 +2262,7 @@ def main(argv=None):
             C.steps.append((name, 'ok', detail))
         except (StepError, Exception) as e:  # noqa: BLE001
             status[name] = 'fail'
-            msg = str(e) if isinstance(e, StepError) else traceback.format_exc(limit=4)
+            msg = str(e) if isinstance(e, (StepError, kproject.ProjectError)) else traceback.format_exc(limit=4)
             C.steps.append((name, 'FAIL', C.short(msg)))
 
     for k, v in expect.items():
@@ -1955,9 +2296,10 @@ def main(argv=None):
                 ('filled_vias', getattr(C, 'filled_vias', None)), ('fiducials', getattr(C, 'fiducials', None)),
                 ('xyrs_omitted', getattr(C, 'omitted', None)), ('board_only_logos', getattr(C, 'logos', None)),
                 ('paste', getattr(C, 'paste', None)), ('xyrs_body_offsets', getattr(C, 'body_offsets', None)),
-                ('xyrs_pad1', getattr(C, 'pin1', None)), ('models', getattr(C, 'models', None)),
-                ('counts', C.counts), ('notes', C.notes), ('steps', [list(s) for s in C.steps]),
-                ('commands', C.commands)])
+                ('xyrs_pad1', getattr(C, 'pin1', None)), ('models', getattr(C, 'models', None))] +
+                ([('pcbway', getattr(C, 'pcbway', None) or collections.OrderedDict())] if cfg.pcbway else []) +
+                [('counts', C.counts), ('notes', C.notes), ('steps', [list(s) for s in C.steps]),
+                 ('commands', C.commands)])
         except Exception:  # noqa: BLE001
             C.steps.append(('manifest', 'FAIL', traceback.format_exc(limit=3)))
     if manifest is not None and not a.no_zip:
@@ -1972,6 +2314,18 @@ def main(argv=None):
                 C.steps.append(('upload zip', 'FAIL', str(e)))
         else:
             C.steps.append(('upload zip', 'SKIP', 'needs ' + ', '.join(needed)))
+    if manifest is not None and not a.no_zip and cfg.pcbway:
+        needed = ('gerbers', 'drill')
+        if all(status.get(n) == 'ok' for n in needed):
+            try:
+                out, names = build_pcbway_zip(C, manifest, C.counts.get('drill_filled') or 0)
+                manifest['pcbway']['gerber_zip'] = {'path': os.path.basename(out), 'members': names,
+                                                    'bytes': os.path.getsize(out), 'sha256': sha256(out)}
+                C.steps.append(('PCBWay Gerber zip', 'ok', '%d members' % len(names)))
+            except (StepError, Exception) as e:  # noqa: BLE001
+                C.steps.append(('PCBWay Gerber zip', 'FAIL', str(e)))
+        else:
+            C.steps.append(('PCBWay Gerber zip', 'SKIP', 'needs ' + ', '.join(needed)))
     if manifest is not None:
         mpath = C.put(os.path.join(C.out, 'docs', '%s_export_manifest.json' % C.prefix))
         manifest['checks'] = C.checks

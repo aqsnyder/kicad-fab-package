@@ -15,7 +15,8 @@ Config file (optional, one of):
 Keys (see docs/configuration.md):
   project_dir          str   project folder inside the repo (default: auto-detected)
   name_template        str   default output NAME; {project} and {revision} (default '{project}_v{revision}')
-  library_dir          str   library submodule folder, relative to project_dir (default: none)
+  library_dir          str   library folder relative to project_dir: a submodule or a plain folder such as ../lib
+                             (default: none)
   library_paths        list  folders of the library copied into the project copy (default: the whole library)
   library_model_paths  list  folders of the library holding 3-D models (default: the whole library)
   generator_prefix     str   prefix of the tool name written into the outputs (default '')
@@ -34,7 +35,8 @@ Keys (see docs/configuration.md):
   xyrs_non_part_refs   regex non_part_refs for the XYRS only (default: non_part_refs)
   xyrs_non_part_libs   list  non_part_libs for the XYRS only (default: non_part_libs)
   require_filled_vias  bool  a board without filled-and-capped vias fails the filled-via checks (default false)
-  pos_note_keeps       str   what the manifest note says the --exclude-dnp position file still keeps
+  pcbway               bool  kicad-fab-export also writes the PCBWay BOM, centroid files and Gerber zip (default false)
+  pos_note_keeps      str   what the manifest note says the --exclude-dnp position file still keeps
 
 Relative paths of the four path keys are resolved against the config file's folder. A bool key's flag --x sets it,
 --no-x clears it.
@@ -77,6 +79,7 @@ KEYS = collections.OrderedDict([
     ('xyrs_non_part_refs', (None, 'regex')),          # None: the same as non_part_refs
     ('xyrs_non_part_libs', (None, 'list')),           # None: the same as non_part_libs
     ('require_filled_vias', (False, 'bool')),
+    ('pcbway', (False, 'bool')),
     ('pos_note_keeps', (POS_NOTE_KEEPS, 'str')),
 ])
 TEMPLATE_KEYS = ('name_template', 'revision_label')
@@ -229,9 +232,10 @@ FLAGS = collections.OrderedDict([
     ('name_template', ('--name-template', dict(metavar='TEMPLATE', help='NAME when --name is not given: {project} '
                                                                         '= KiCad project name, {revision} = its '
                                                                         "REVISION (default '{project}_v{revision}')"))),
-    ('library_dir', ('--library-dir', dict(metavar='DIR', help='library submodule folder relative to the project '
-                                                               'folder; its files are added to the project copy '
-                                                               '("" = none; default: none)'))),
+    ('library_dir', ('--library-dir', dict(metavar='DIR', help='library folder relative to the project folder: a '
+                                                               'git submodule or a plain folder of the repository '
+                                                               '(e.g. ../lib); its files are added to the project '
+                                                               'copy ("" = none; default: none)'))),
     ('library_paths', ('--library-paths', dict(type=csv_list, metavar='P1,P2', help='folders of the library put '
                                                                                     'into the project copy (default: '
                                                                                     'the whole library)'))),
@@ -271,12 +275,15 @@ FLAGS = collections.OrderedDict([
                                                               '--non-part-libs)'))),
     ('require_filled_vias', ('--require-filled-vias', dict(help='fail the filled-via checks when the board has no '
                                                                 'filled-and-capped vias'))),
+    ('pcbway', ('--pcbway', dict(help='also write the PCBWay assembly files: BOM xlsx, top and bottom centroid csvs, '
+                                      'and the PCBWay Gerber zip'))),
 ])
 # the --no-x flag of each bool key: it clears the key whatever the config file says
 NO_FLAG_HELP = {
     'require_dru': 'do not require <project>.kicad_dru, whatever the config file says',
     'require_filled_vias': 'a board without filled-and-capped vias passes the filled-via checks, whatever the config '
                            'file says',
+    'pcbway': 'do not write the PCBWay files, whatever the config file says',
 }
 
 

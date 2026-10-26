@@ -497,24 +497,27 @@ def hygiene(rows):
 
 # ---------------------------------------------------------------- writers
 
-def write_xlsx(path, rows, when, title, description):
+def write_xlsx(path, rows, when, title, description, columns=COLUMNS, creator=TOOL, max_width=None):
+    """A one-sheet BOM xlsx of rows (dicts keyed by columns), byte-reproducible for when (the commit date). Also
+    kicad-fab-export's PCBWay BOM (its columns, creator export_fab.py, columns at most max_width wide)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = 'Sheet1'
-    ws.append(COLUMNS)
+    ws.append(columns)
     for c in ws[1]:
         c.font = Font(bold=True)
         c.alignment = Alignment(horizontal='center')
     for r in rows:
-        ws.append([None if r[k] == '' else r[k] for k in COLUMNS])   # an empty field is no cell, not an empty one
+        ws.append([None if r[k] == '' else r[k] for k in columns])   # an empty field is no cell, not an empty one
     for row in ws.iter_rows(min_row=2):
         for c in row:
             if c.data_type == 'f':  # a value starting with '=' is text here, never a formula
                 c.data_type = 's'
-    for i, k in enumerate(COLUMNS, 1):
-        ws.column_dimensions[get_column_letter(i)].width = max([len(k)] + [len(str(r[k])) for r in rows]) + 2
+    for i, k in enumerate(columns, 1):
+        width = max([len(k)] + [len(str(r[k])) for r in rows]) + 2
+        ws.column_dimensions[get_column_letter(i)].width = min(width, max_width) if max_width else width
     p = wb.properties
-    p.creator = 'make_macrofab_xlsx.py'
+    p.creator = creator
     p.title = title
     p.description = description
     p.created = p.modified = when

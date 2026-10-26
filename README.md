@@ -48,6 +48,11 @@ committed. This tool:
   csvs, a per-designator diff against a baseline BOM, and a report of string-hygiene problems (odd MPN characters,
   manufacturer-name variants, value + package collisions, mixed-Populate groups).
 - **Solder paste on unplaced parts** caught twice: in the board and in the plotted paste Gerbers.
+- With `--pcbway`, **PCBWay's assembly files** too: the BOM in PCBWay's template layout (one line per part number,
+  `SMD` / `thru-hole` / `DNS`), a centroid csv per side and a Gerber zip, made from the XYRS rows and checked against
+  them; the MacroFab files stay the same.
+- A part library that is a **git submodule or a folder of the repository** (such as `hw/lib` beside the boards,
+  reached as `${KIPRJMOD}/../lib`), taken from the commit for the project copy and the STEP models.
 - `kicad-bom-check` (regenerate and compare a committed BOM csv), `kicad-bomdiff` (per-reference BOM diff) and
   `kicad-project-copy` (a checked KiCad project copy of any commit).
 - A manifest with commands, counts, every check, and the sha256 of every file; reproducible XYRS, BOM xlsx and zip
@@ -178,6 +183,7 @@ kicad-bomdiff ../bomdiff/v1.0/v1.0.perref.csv ../bomdiff/v1.1/v1.1.perref.csv
 | [kicad-fab-export](docs/export-fab.md) | every output file, every check and what a FAIL means, the manifest, the upload zip |
 | [MacroFab walkthrough](docs/macrofab.md) | uploading the package, layer mapping, filled vias, BOM upload, alternates, consigned parts, the DFM email |
 | [XYRS placement format](docs/xyrs.md) | units, origin, position, rotation, sides, types, with a worked example |
+| [PCBWay](docs/pcbway.md) | the PCBWay BOM, centroid files and Gerber zip of `--pcbway` |
 | [BOM tools](docs/bom.md) | the BOM xlsx, the checks report, `kicad-bom-check` and `kicad-bomdiff` |
 | [CLI reference](docs/cli.md) | every command, flag, default and environment variable |
 | [Configuration](docs/configuration.md) | every config key with type, default and example |
@@ -202,14 +208,14 @@ baseline_label = "v1.0"
 | `KICAD10_3DMODEL_DIR` | KiCad's 3-D model library |
 | `KICAD_FAB_CONFIG` | the config file |
 
-All 21 keys are in [docs/configuration.md](docs/configuration.md).
+All 22 keys are in [docs/configuration.md](docs/configuration.md).
 
 ## Limitations and known issues
 
 - **KiCad 10 only** (its board format and `kicad-cli` options). The project must be committed, and its folder must
   hold exactly one `.kicad_pro`.
-- **MacroFab-specific**: the XYRS format, the upload member names, the BOM layout and the DFM notes follow MacroFab's
-  rules. Other assembly houses need other formats.
+- **MacroFab first**: the XYRS format, the upload member names, the BOM layout and the DFM notes follow MacroFab's
+  rules. `--pcbway` adds PCBWay's BOM, centroid files and Gerber zip; other assembly houses need other formats.
 - The bottom-side rotation rule (KiCad orientation + 180) matches MacroFab's own generator; check bottom-side pin 1
   in MacroFab's placement view (the manifest lists every part's pad-1 offset).
 - Through vias only (blind or buried vias fail a check), no slots or routed holes in the drill files (draw slots on

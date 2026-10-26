@@ -156,3 +156,6 @@ Two manifest keys help review the placement in MacroFab's viewer:
 | Excluded from BOM, not DNP | rows with `Populate 0` | kept |
 | Fiducials, mounting holes | no row | kept (unless excluded from position files) |
 | Used by MacroFab | yes | no |
+
+The PCBWay centroid files that `--pcbway` adds are the XYRS's Populate 1 rows in mm, one file per side, with KiCad's
+own orientation on the bottom (no +180): see [PCBWay](pcbway.md#the-centroid-files).

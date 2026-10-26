@@ -78,7 +78,7 @@ usage: kicad-fab-export [-h] --out DIR [--repo DIR] [--no-zip] [--zip-only]
                         [--ibom-pkg DIR] [--non-part-refs REGEX]
                         [--non-part-libs L1,L2] [--xyrs-non-part-refs REGEX]
                         [--xyrs-non-part-libs L1,L2] [--require-filled-vias]
-                        [--no-require-filled-vias]
+                        [--no-require-filled-vias] [--pcbway] [--no-pcbway]
                         [REV]
 ```
 
@@ -87,7 +87,7 @@ usage: kicad-fab-export [-h] --out DIR [--repo DIR] [--no-zip] [--zip-only]
 | `REV` | none |  |  | the commit to export: any commit-ish (HEAD, a branch, a tag, a hash); required except with --zip-only |
 | `--out DIR` | (required) |  |  | the package folder (created if needed); fab/, assembly/ and docs/ must be empty unless --force |
 | `--repo DIR` | `.` |  |  | the git repository (default: the current folder) |
-| `--no-zip` | off |  |  | do not write the upload zip |
+| `--no-zip` | off |  |  | do not write the upload zip (nor, with --pcbway, the PCBWay Gerber zip) |
 | `--zip-only` | off |  |  | only re-pack the upload zip from the files already in --out and refresh the manifest (no REV, no KiCad) |
 | `--name NAME` | none |  |  | output name prefix (default: the name template) |
 | `--work DIR` | none |  |  | work folder, kept (an empty or new folder); default: a temp folder removed on success |
@@ -99,7 +99,7 @@ usage: kicad-fab-export [-h] --out DIR [--repo DIR] [--no-zip] [--zip-only]
 | `--config FILE` | see [Configuration](configuration.md#the-config-file) | `KICAD_FAB_CONFIG` |  | config file (default: $KICAD_FAB_CONFIG, else kicad-fab.toml or kicad-fab.json at the repo top level) |
 | `--project-dir DIR` | auto-detected |  | `project_dir` | project folder inside the repo, "." for the top level (default: auto-detected, the folder of the only .kicad_pro with a .kicad_pcb of the same name) |
 | `--name-template TEMPLATE` | `{project}_v{revision}` |  | `name_template` | NAME when --name is not given: {project} = KiCad project name, {revision} = its REVISION (default '{project}_v{revision}') |
-| `--library-dir DIR` | none |  | `library_dir` | library submodule folder relative to the project folder; its files are added to the project copy ("" = none; default: none) |
+| `--library-dir DIR` | none |  | `library_dir` | library folder relative to the project folder: a git submodule or a plain folder of the repository (e.g. ../lib); its files are added to the project copy ("" = none; default: none) |
 | `--library-paths P1,P2` | `[]` |  | `library_paths` | folders of the library put into the project copy (default: the whole library) |
 | `--library-model-paths P1,P2` | `[]` |  | `library_model_paths` | folders of the library holding 3-D models (default: the whole library) |
 | `--generator-prefix PREFIX` | `""` |  | `generator_prefix` | prefix of the tool name written into the outputs (default '') |
@@ -113,6 +113,7 @@ usage: kicad-fab-export [-h] --out DIR [--repo DIR] [--no-zip] [--zip-only]
 | `--xyrs-non-part-refs REGEX` | same as `non_part_refs` |  | `xyrs_non_part_refs` | --non-part-refs for the XYRS only (default: --non-part-refs) |
 | `--xyrs-non-part-libs L1,L2` | same as `non_part_libs` |  | `xyrs_non_part_libs` | --non-part-libs for the XYRS only (default: --non-part-libs) |
 | `--require-filled-vias`, `--no-require-filled-vias` | `false` |  | `require_filled_vias` | fail the filled-via checks when the board has no filled-and-capped vias; `--no-require-filled-vias`: a board without filled-and-capped vias passes the filled-via checks, whatever the config file says |
+| `--pcbway`, `--no-pcbway` | `false` |  | `pcbway` | also write the PCBWay assembly files: BOM xlsx, top and bottom centroid csvs, and the PCBWay Gerber zip; `--no-pcbway`: do not write the PCBWay files, whatever the config file says |
 
 ## `kicad-macrofab-bom`
 
@@ -202,11 +203,11 @@ usage: kicad-project-copy [-h] (--rev REV | --worktree) [--repo DIR]
 | `--rev REV` | none |  |  | take the files from this commit with git archive |
 | `--worktree` | off |  |  | copy the files from the working tree instead |
 | `--repo DIR` | `.` |  |  | the git repository (default: the current folder) |
-| `--library {auto,yes,no}` | `auto` |  |  | add the library submodule: auto (if its checkout has the commit), yes (required) or no (default: auto) |
+| `--library {auto,yes,no}` | `auto` |  |  | add the library (--library-dir): auto (a submodule if its checkout has the commit, a folder if the commit has it), yes (required) or no (default: auto) |
 | `--full` | off |  |  | copy every tracked file of the project folder, not only what KiCad reads |
 | `--config FILE` | see [Configuration](configuration.md#the-config-file) | `KICAD_FAB_CONFIG` |  | config file (default: $KICAD_FAB_CONFIG, else kicad-fab.toml or kicad-fab.json at the repo top level) |
 | `--project-dir DIR` | auto-detected |  | `project_dir` | project folder inside the repo, "." for the top level (default: auto-detected, the folder of the only .kicad_pro with a .kicad_pcb of the same name) |
-| `--library-dir DIR` | none |  | `library_dir` | library submodule folder relative to the project folder; its files are added to the project copy ("" = none; default: none) |
+| `--library-dir DIR` | none |  | `library_dir` | library folder relative to the project folder: a git submodule or a plain folder of the repository (e.g. ../lib); its files are added to the project copy ("" = none; default: none) |
 | `--library-paths P1,P2` | `[]` |  | `library_paths` | folders of the library put into the project copy (default: the whole library) |
 | `--require-dru`, `--no-require-dru` | `false` |  | `require_dru` | require &lt;project&gt;.kicad_dru in the project copy; `--no-require-dru`: do not require &lt;project&gt;.kicad_dru, whatever the config file says |
 

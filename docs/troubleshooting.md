@@ -185,9 +185,11 @@ FAIL STEP: every placed part with a model entry gets a model  -- P3 RV1
 ```
 
 Every model entry of these footprints points at a file that does not exist (here
-`${KIPRJMOD}/libs/3d_shapes/textool_40.wrl`, which the demo does not ship). Fix the path, add the file (for a library
-submodule, set [`library_dir`](configuration.md#library_dir)), or remove the entry; a footprint with no model entry
-at all is only a warning (`STEP: fitted parts with no 3-D model in their footprint`).
+`${KIPRJMOD}/libs/3d_shapes/textool_40.wrl`, which the demo does not ship). Fix the path, add the file (for a part
+library, a submodule or a folder such as `../lib`, set [`library_dir`](configuration.md#library_dir)), or remove the
+entry; a footprint with no model entry at all is only a warning (`STEP: fitted parts with no 3-D model in their
+footprint`). A model that exists only as VRML (`.wrl`, with no `.step` beside it) stops the STEP export itself:
+`kicad-cli` cannot put VRML into a STEP file.
 
 ### DNP but still in the BOM
 

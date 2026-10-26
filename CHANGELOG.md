@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `kicad-fab-export --pcbway` (config key `pcbway`): PCBWay's assembly files next to the MacroFab ones, which do not
+  change. `assembly/NAME_pcbway_bom.xlsx` uses the headers of PCBWay's BOM template (`Item #`, `*Designator`, `*Qty`,
+  `Manufacturer`, `*Mfg Part #`, `Description / Value`, `*Package/Footprint`, `Type`, `Your Instructions / Notes`),
+  one line per MPN + Manufacturer + Value + Footprint + Type with the designators in natural order. `Type` is `SMD` or
+  `thru-hole` from the footprint attribute (the XYRS Type) and `DNS` for Populate 0, so a DNS part never shares a line
+  with fitted ones. `assembly/NAME_pcbway_top.csv` and `NAME_pcbway_bottom.csv` (`Designator, Mid X(mm), Mid Y(mm),
+  Layer, Rotation`) hold the Populate 1 XYRS rows in mm, origin at the outline's bottom-left corner seen from the top,
+  with KiCad's own rotation on both sides. `NAME_pcbway_gerbers.zip` holds the fab Gerbers and the PTH and NPTH drill
+  files (the filled-via file only when it has holes). Each file is read back and checked against the XYRS, the
+  centroid rotations against KiCad's position file. See `docs/pcbway.md`.
+- `library_dir` can name a plain folder of the repository instead of a git submodule, beside the project folder too:
+  `library_dir = "../lib"` for kicad-project-template's `hw/lib`, reached as `${KIPRJMOD}/../lib`. Its files come from
+  the exported commit with `git archive` (`kicad-project-copy --worktree`: from the working tree), for the project copy
+  and for the STEP's 3-D models, so `STEP: every placed part with a model entry gets a model` passes for parts whose
+  models live there.
+
+### Fixed
+
+- `STEP: origin = XYRS corner` failed on a round board. The board-only STEP's extent came from its CARTESIAN_POINTs,
+  and a board outline that is one circle is exported as a STEP CIRCLE: its centre and one seam point, so an 18.5 mm
+  board read y 0..9.25. The extent now comes from the edges: their end points, the extremes that circle and arc edges
+  pass through (in the edge's direction, so a shallow arc counts only its own bulge), and the control points of
+  spline edges.
+
 ## [0.1.0] - 2026-10-25
 
 Initial public release.
